@@ -28,7 +28,6 @@ export default function AppOverlays() {
       )}
       {isHome && <RemoteCursors />}
       <EasterEggs />
-      {!isResume && !disableDecorative && <DeveloperTools />}
       {isHome && <MotionNudge />}
       {isHome && <AIAgent />}
     </>
