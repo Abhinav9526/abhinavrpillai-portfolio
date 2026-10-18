@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Voice Call Assistant - Admin & Simulator</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Lucide Icons for clean vector glyphs -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">V</div>
+      <div class="logo-text">VoiceAI-Caller</div>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span id="backendStatus">System Idle</span>
+    </div>
+  </header>
+
+  <main class="main-content">
+    
+    <!-- Admin Settings Panel (Left Column) -->
+    <section class="panel">
+      <div>
+        <h2 class="panel-title">
+          <i data-lucide="sliders" class="panel-icon"></i>
+          AI Assistant Admin Panel
+        </h2>
+        <p class="panel-subtitle">Configure what the AI says and how it behaves during calls</p>
+      </div>
+
+      <!-- Quick Persona Selection -->
+      <div class="form-group">
+        <label>Active Call Profile Persona</label>
+        <div class="profile-selector">
+          <button class="profile-btn active" id="btnResumeProfile" onclick="selectProfile('resume')">
+            <i data-lucide="user-round"></i> Personal Resume AI
+          </button>
+          <button class="profile-btn" id="btnSupportProfile" onclick="selectProfile('support')">
+            <i data-lucide="headset"></i> Customer Support Bot
+          </button>
+        </div>
+      </div>
+
+      <!-- Instructions Area -->
+      <div class="form-group">
+        <label for="systemInstructions">System instructions (Behavior & Personality)</label>
+        <textarea id="systemInstructions" rows="5" placeholder="Define how the AI answers the call, its tone of voice, name, and response rules..."></textarea>
+      </div>
+
+      <!-- Context/Data Area -->
+      <div class="form-group">
+        <label for="contextData">Context Data (Resume Text, FAQs, or Knowledge base)</label>
+        <textarea id="contextData" rows="8" placeholder="Paste the text content here (e.g. resume content or support FAQ list). The AI uses this as the absolute truth to answer questions."></textarea>
+      </div>
+
+      <!-- Action Button -->
+      <button class="save-btn" onclick="saveConfiguration()">
+        <i data-lucide="save"></i> Save & Apply Configuration
+      </button>
+
+      <!-- Local Host / Twilio Telephony details -->
+      <div class="info-box">
+        <span class="info-title">
+          <i data-lucide="phone-call" style="width:16px; height:16px;"></i>
+          Want to connect a REAL phone number?
+        </span>
+        <p>
+          1. Expose this port via Ngrok: <code>ngrok http 3000</code>.<br>
+          2. Copy your forwarding https domain (e.g. <code>abc.ngrok-free.app</code>).<br>
+          3. Set it in your <code>.env</code> file: <code>PUBLIC_DOMAIN=abc.ngrok-free.app</code>.<br>
+          4. In Twilio console, point your phone number's <b>Incoming Webhook</b> to:<br>
+          <code style="word-break: break-all;">https://abc.ngrok-free.app/twilio/voice</code>
+        </p>
+      </div>
+    </section>
+
+    <!-- Web Dialer Simulator Panel (Right Column) -->
+    <section class="phone-container" style="flex-direction: column; gap: 20px;">
+      <div class="phone-mockup" id="phoneMock">
+        <div class="phone-notch"></div>
+        <div class="phone-screen" id="phoneScreen">
+          
+          <div class="phone-header">
+            <div class="phone-call-title" id="callLabel">Simulated Call</div>
+            <div class="phone-contact-name" id="contactName">John's Resume AI</div>
+            <div class="phone-status" id="callStatus">Ready to Call</div>
+          </div>
+
+          <div class="visualizer-area" id="visualizerArea">
+            <div class="phone-avatar" id="phoneAvatar">
+              <i data-lucide="phone"></i>
+            </div>
+            
+            <div class="visualizer-rings">
+              <div class="ring"></div>
+              <div class="ring"></div>
+              <div class="ring"></div>
+            </div>
+
+            <div class="canvas-container">
+              <canvas id="waveCanvas"></canvas>
+            </div>
+          </div>
+
+          <div class="phone-controls">
+            <div class="call-timer" id="callTimer">00:00</div>
+            
+            <!-- Chat Input (Visible only during active call) -->
+            <div id="chatInputArea" style="display: none; width: 100%; padding: 0 10px; gap: 8px; margin-bottom: 5px;">
+              <input type="text" id="chatMessage" placeholder="Type message to AI..." style="flex: 1; padding: 10px 14px; border-radius: 20px; font-size: 13px; background: rgba(17, 24, 39, 0.9); border: 1px solid var(--border-color); color: white;" onkeydown="if(event.key==='Enter') sendChatMessage()">
+              <button onclick="sendChatMessage()" style="background: var(--accent-color); border: none; width: 36px; height: 36px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;">
+                <i data-lucide="send" style="width: 14px; height: 14px;"></i>
+              </button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;">
+              <div style="display: flex; justify-content: center; width: 100%;">
+                <!-- Dial Button -->
+                <button class="call-btn btn-dial" id="btnDial" onclick="startCall()">
+                  <i data-lucide="phone"></i>
+                </button>
+                
+                <!-- Hangup Button -->
+                <button class="call-btn btn-hangup" id="btnHangup" onclick="endCall()">
+                  <i data-lucide="phone-off"></i>
+                </button>
+              </div>
+
+              <!-- Speaker Diagnostics -->
+              <button onclick="testSpeakers()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 6px 12px; border-radius: 20px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">
+                <i data-lucide="volume-2" style="width: 12px; height: 12px;"></i> Test Speakers
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Live Debug Transcripts Console -->
+      <div class="panel" style="width: 320px; padding: 20px; border-radius: 20px; gap: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);" id="debugPanel">
+        <h3 style="font-size: 13px; color: var(--accent-color); font-weight: 600; display: flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">
+          <i data-lucide="message-square" style="width: 15px; height: 15px;"></i> Live Call Transcript
+        </h3>
+        <div id="transcriptLog" style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
+          <div style="color: var(--text-secondary); font-style: italic; text-align: center; padding: 15px 0;">Transcripts will appear here in real-time...</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Proximity Sensor Screen-Off Overlay -->
+  <div id="proximityOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000000; z-index: 99999; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; text-align: center; padding: 20px;">
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; margin-bottom: 15px;">
+      <i data-lucide="eye-off" style="width: 20px; height: 20px; color: #333;"></i>
+    </div>
+    <span style="color: #4b5563; font-size: 12px; font-weight: 500; letter-spacing: 0.5px;">Screen off (Proximity Active)</span>
+    <span style="color: #374151; font-size: 10px; margin-top: 5px;">Tap anywhere to unlock screen</span>
+  </div>
+
+  <!-- Load script logic -->
+  <script src="app.js"></script>
+  <script>
+    // Initialize Lucide icons on render
+    lucide.createIcons();
+  </script>
+</body>
+</html>

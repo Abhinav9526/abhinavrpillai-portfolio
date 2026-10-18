@@ -1,0 +1,16 @@
+abhinavrpillai/Backend/.env
+abhinavrpillai/Backend/.env.*
+abhinavrpillai/Backend/node_modules/
+abhinavrpillai/Backend/.next/
+abhinavrpillai/Backend/npm-debug.log*
+abhinavrpillai/Backend/yarn-debug.log*
+abhinavrpillai/Backend/yarn-error.log*
+
+abhinavrpillai/Frontend/.env
+abhinavrpillai/Frontend/.env.*
+abhinavrpillai/Frontend/node_modules/
+abhinavrpillai/Frontend/.next/
+abhinavrpillai/Frontend/out/
+abhinavrpillai/Frontend/npm-debug.log*
+abhinavrpillai/Frontend/yarn-debug.log*
+abhinavrpillai/Frontend/yarn-error.log*

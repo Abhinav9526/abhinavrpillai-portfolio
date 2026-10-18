@@ -1,0 +1,8 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Workday Blue background -->
+  <circle cx="12" cy="12" r="11.5" fill="#0875c4" />
+  <!-- Sun/Head -->
+  <circle cx="12" cy="9.2" r="2.2" fill="#f07c00" />
+  <!-- Rising Arc/Arms -->
+  <path d="M6.5 12.5c0 3 2.5 5.5 5.5 5.5s5.5-2.5 5.5-5.5c0-.7-.6 0-1.3.5-1.2.8-2.7 1.2-4.2 1.2s-3-.4-4.2-1.2c-.7-.5-1.3-1.2-1.3-.5z" fill="#f07c00" />
+</svg>
