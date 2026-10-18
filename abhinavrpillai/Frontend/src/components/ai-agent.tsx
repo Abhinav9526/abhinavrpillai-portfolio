@@ -35,58 +35,6 @@ const QUICK_TOPICS = [
   { label: "📞 Contact Abhinav", prompt: "How can a recruiter or client reach out to you?" },
 ];
 
-// Resample floating point buffer from input rate to output rate
-function resampleBuffer(inputBuffer: Float32Array, inputSampleRate: number, outputSampleRate: number): Float32Array {
-  if (inputSampleRate === outputSampleRate) {
-    return inputBuffer;
-  }
-  const ratio = inputSampleRate / outputSampleRate;
-  const newLength = Math.round(inputBuffer.length / ratio);
-  const result = new Float32Array(newLength);
-  for (let i = 0; i < newLength; i++) {
-    const nextIndex = Math.round(i * ratio);
-    if (nextIndex < inputBuffer.length) {
-      result[i] = inputBuffer[nextIndex];
-    }
-  }
-  return result;
-}
-
-// Convert float32 [-1.0, 1.0] samples to 16-bit signed PCM ArrayBuffer
-function float32ToPcm16(float32Array: Float32Array): ArrayBuffer {
-  const buffer = new ArrayBuffer(float32Array.length * 2);
-  const view = new DataView(buffer);
-  for (let i = 0; i < float32Array.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32Array[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); // little endian
-  }
-  return buffer;
-}
-
-// Convert 16-bit PCM ArrayBuffer to Float32Array
-function pcm16ToFloat32(arrayBuffer: ArrayBuffer): Float32Array {
-  if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-    return new Float32Array(0);
-  }
-  const int16Array = new Int16Array(arrayBuffer.slice(0, Math.floor(arrayBuffer.byteLength / 2) * 2));
-  const float32Array = new Float32Array(int16Array.length);
-  for (let i = 0; i < int16Array.length; i++) {
-    float32Array[i] = int16Array[i] / 32768.0;
-  }
-  return float32Array;
-}
-
-// Base64 to ArrayBuffer helper
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binaryString = window.atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
-
 export default function AIAgent() {
   const [callState, setCallState] = useState<"idle" | "ringing" | "connected" | "ended">("idle");
   const [isOpen, setIsOpen] = useState(false);
@@ -97,10 +45,11 @@ export default function AIAgent() {
   const [showChat, setShowChat] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [mounted, setMounted] = useState(false);
-  const [micStatus, setMicStatus] = useState<"idle" | "listening" | "speaking" | "muted" | "error" | "connecting">("idle");
+  const [micStatus, setMicStatus] = useState<"idle" | "listening" | "speaking" | "muted" | "error" | "thinking">("idle");
   const [hasMicError, setHasMicError] = useState(false);
   const [spectrumBars, setSpectrumBars] = useState<number[]>(new Array(24).fill(12));
   const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false);
+  const [liveInterimText, setLiveInterimText] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -108,41 +57,52 @@ export default function AIAgent() {
   const ringingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const ringingGainRef = useRef<GainNode | null>(null);
 
-  // Live streaming WebSocket refs
-  const socketRef = useRef<WebSocket | null>(null);
-  const isDirectGeminiWsRef = useRef<boolean>(false);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextPlayTimeRef = useRef<number>(0);
+  // Speech Recognition & Synthesis refs
+  const recognitionRef = useRef<any>(null);
   const isAiSpeakingRef = useRef<boolean>(false);
-  const speakingTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Frequency Analyser & Visualizer
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-
+  const isMutedRef = useRef<boolean>(isMuted);
+  const isSpeakerOnRef = useRef<boolean>(isSpeakerOn);
   const callStateRef = useRef(callState);
-  const isMutedRef = useRef(isMuted);
-  const isSpeakerOnRef = useRef(isSpeakerOn);
-  const hasMicErrorRef = useRef(hasMicError);
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const animFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     setMounted(true);
+    // Preload available voices
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      const loadVoices = () => {
+        const voices = window.speechSynthesis.getVoices();
+        // Look for Indian English voice or best natural male voice
+        const indianVoice = voices.find(
+          (v) => (v.lang === "en-IN" || v.lang.includes("IN")) && (v.name.toLowerCase().includes("male") || !v.name.toLowerCase().includes("female"))
+        ) || voices.find((v) => v.lang === "en-IN");
+
+        const englishMaleVoice = voices.find(
+          (v) => (v.lang.startsWith("en") && v.name.toLowerCase().includes("male") && !v.name.toLowerCase().includes("female"))
+        );
+
+        const defaultEn = voices.find((v) => v.lang.startsWith("en"));
+        selectedVoiceRef.current = indianVoice || englishMaleVoice || defaultEn || voices[0] || null;
+      };
+
+      loadVoices();
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
+    }
+
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, []);
 
   useEffect(() => {
-    callStateRef.current = callState;
     isMutedRef.current = isMuted;
     isSpeakerOnRef.current = isSpeakerOn;
-    hasMicErrorRef.current = hasMicError;
-  }, [callState, isMuted, isSpeakerOn, hasMicError]);
+    callStateRef.current = callState;
+  }, [isMuted, isSpeakerOn, callState]);
 
-  // Call duration timer
+  // Duration timer
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (callState === "connected") {
@@ -155,42 +115,45 @@ export default function AIAgent() {
     };
   }, [callState]);
 
-  // Scroll to bottom when message log changes
+  // Scroll to bottom of transcript
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, showChat]);
+  }, [messages, liveInterimText, showChat]);
 
-  // Audio Spectrum visualizer loop
-  const startVisualizer = useCallback(() => {
-    const updateSpectrum = () => {
-      if (analyserRef.current && callStateRef.current === "connected") {
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteFrequencyData(dataArray);
-
-        // Map into 24 animated bars
-        const barsCount = 24;
-        const step = Math.max(1, Math.floor(dataArray.length / barsCount));
-        const newBars = new Array(barsCount).fill(0).map((_, i) => {
-          const val = dataArray[i * step] || 0;
-          // Scale to height percentage (minimum 10% for ambient breathing)
-          const baseHeight = isAiSpeakingRef.current ? 20 : 10;
-          const dynamicHeight = Math.min(100, Math.max(baseHeight, (val / 255) * 100));
-          return dynamicHeight;
-        });
-
-        setSpectrumBars(newBars);
-      } else {
-        // Idle ambient breathing wave
-        const t = Date.now() / 300;
-        const ambientBars = new Array(24).fill(0).map((_, i) => {
-          return 12 + Math.sin(t + i * 0.4) * 8;
-        });
-        setSpectrumBars(ambientBars);
+  // Audio spectrum wave animation
+  const startSpectrumAnimation = useCallback(() => {
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      if (callStateRef.current === "connected") {
+        if (isAiSpeakingRef.current) {
+          // Dynamic vivid voice frequency simulation
+          const bars = new Array(24).fill(0).map((_, i) => {
+            const harmonic1 = Math.sin(frame * 0.18 + i * 0.5) * 35;
+            const harmonic2 = Math.cos(frame * 0.28 + i * 0.3) * 25;
+            const jitter = (i % 3 === 0 ? 15 : 5);
+            return Math.min(100, Math.max(18, 45 + harmonic1 + harmonic2 + jitter));
+          });
+          setSpectrumBars(bars);
+        } else if (micStatus === "listening") {
+          // Responsive listener pulse
+          const bars = new Array(24).fill(0).map((_, i) => {
+            const wave = Math.sin(frame * 0.12 + i * 0.4) * 20;
+            return Math.min(100, Math.max(12, 28 + wave));
+          });
+          setSpectrumBars(bars);
+        } else {
+          // Gentle ambient breathing wave
+          const bars = new Array(24).fill(0).map((_, i) => {
+            return 12 + Math.sin(frame * 0.06 + i * 0.3) * 8;
+          });
+          setSpectrumBars(bars);
+        }
       }
-      animFrameRef.current = requestAnimationFrame(updateSpectrum);
+      animFrameRef.current = requestAnimationFrame(animate);
     };
-    animFrameRef.current = requestAnimationFrame(updateSpectrum);
-  }, []);
+    animFrameRef.current = requestAnimationFrame(animate);
+  }, [micStatus]);
 
   const playRingTone = (ctx: AudioContext, startTime: number) => {
     const osc1 = ctx.createOscillator();
@@ -203,12 +166,10 @@ export default function AIAgent() {
     osc2.frequency.setValueAtTime(480, startTime);
 
     gainNode.gain.setValueAtTime(0, startTime);
-    // Ring 1
     gainNode.gain.linearRampToValueAtTime(0.12, startTime + 0.05);
     gainNode.gain.setValueAtTime(0.12, startTime + 0.55);
     gainNode.gain.linearRampToValueAtTime(0, startTime + 0.6);
 
-    // Ring 2
     gainNode.gain.setValueAtTime(0, startTime + 0.85);
     gainNode.gain.linearRampToValueAtTime(0.12, startTime + 0.9);
     gainNode.gain.setValueAtTime(0.12, startTime + 1.4);
@@ -236,435 +197,230 @@ export default function AIAgent() {
     }
   };
 
-  // High-performance Jitter Buffer Audio Queue (Zero breaks, zero gaps)
-  const queueAudioChunk = (float32Data: Float32Array) => {
-    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-      return;
-    }
-    if (!isSpeakerOnRef.current) {
-      return;
-    }
-    if (!float32Data || float32Data.length === 0) {
-      return;
+  // Speaks AI response cleanly with zero stutter and zero acoustic echo
+  const speakAiResponse = (text: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (!isSpeakerOnRef.current) return;
+
+    // Stop any speech recognition while AI talks to prevent hearing itself!
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
     }
 
-    const audioCtx = audioContextRef.current;
+    // Cancel any previous utterance
+    window.speechSynthesis.cancel();
 
-    // Safety check: resume suspended context
-    if (audioCtx.state === "suspended") {
-      audioCtx.resume().catch((e) => console.warn("Failed to resume AudioContext in queue:", e));
+    const utterance = new SpeechSynthesisUtterance(text);
+    if (selectedVoiceRef.current) {
+      utterance.voice = selectedVoiceRef.current;
+    }
+    utterance.rate = 1.05; // Natural modern conversation pace
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+      isAiSpeakingRef.current = true;
+      setMicStatus("speaking");
+    };
+
+    utterance.onend = () => {
+      isAiSpeakingRef.current = false;
+      if (callStateRef.current === "connected" && !isMutedRef.current) {
+        setMicStatus("listening");
+        // Resume listening automatically for next user question
+        startListening();
+      } else {
+        setMicStatus("idle");
+      }
+    };
+
+    utterance.onerror = () => {
+      isAiSpeakingRef.current = false;
+      if (callStateRef.current === "connected") {
+        setMicStatus("listening");
+        startListening();
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Start continuous Native Speech Recognition
+  const startListening = () => {
+    if (typeof window === "undefined") return;
+    if (isAiSpeakingRef.current || isMutedRef.current) return;
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.warn("SpeechRecognition not supported in this browser");
+      return;
     }
 
     try {
-      const safeSamples = new Float32Array(float32Data.length);
-      for (let i = 0; i < float32Data.length; i++) {
-        const sample = float32Data[i];
-        safeSamples[i] = Number.isFinite(sample) ? Math.max(-1, Math.min(1, sample)) : 0;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
       }
 
-      // Gemini Live sends audio at 24000Hz PCM
-      const audioBuffer = audioCtx.createBuffer(1, safeSamples.length, 24000);
-      audioBuffer.getChannelData(0).set(safeSamples);
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-IN";
 
-      const source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-
-      // Micro-fade gain to eliminate digital click/pop on boundary
-      const gainNode = audioCtx.createGain();
-      gainNode.gain.value = 1;
-
-      // Connect to analyser for real-time visualizer, then destination
-      source.connect(gainNode);
-      if (analyserRef.current) {
-        gainNode.connect(analyserRef.current);
-        analyserRef.current.connect(audioCtx.destination);
-      } else {
-        gainNode.connect(audioCtx.destination);
-      }
-
-      const curTime = audioCtx.currentTime;
-
-      // Continuous Adaptive Timeline Scheduling:
-      // If playback has stopped or is far behind, establish initial lead time of 80ms
-      if (nextPlayTimeRef.current < curTime) {
-        nextPlayTimeRef.current = curTime + 0.08;
-      }
-
-      source.start(nextPlayTimeRef.current);
-      nextPlayTimeRef.current += audioBuffer.duration;
-
-      isAiSpeakingRef.current = true;
-      setMicStatus("speaking");
-
-      if (speakingTimerRef.current) {
-        clearTimeout(speakingTimerRef.current);
-      }
-      const remainingSec = Math.max(0.1, nextPlayTimeRef.current - curTime);
-      speakingTimerRef.current = setTimeout(() => {
-        isAiSpeakingRef.current = false;
-        setMicStatus("idle");
-      }, remainingSec * 1000 + 100);
-
-      activeSourcesRef.current.push(source);
-      source.onended = () => {
-        activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+      recognition.onstart = () => {
+        if (!isAiSpeakingRef.current && !isMutedRef.current) {
+          setMicStatus("listening");
+        }
       };
+
+      recognition.onresult = (event: any) => {
+        if (isAiSpeakingRef.current) return;
+
+        let interim = "";
+        let finalTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interim += transcript;
+          }
+        }
+
+        if (interim) {
+          setLiveInterimText(interim);
+        }
+
+        if (finalTranscript.trim()) {
+          setLiveInterimText("");
+          handleUserQuery(finalTranscript.trim());
+        }
+      };
+
+      recognition.onerror = (e: any) => {
+        if (e.error !== "no-speech") {
+          console.warn("Speech recognition error:", e.error);
+        }
+      };
+
+      recognition.onend = () => {
+        // Automatically restart listening if still in active call and AI not speaking
+        if (callStateRef.current === "connected" && !isAiSpeakingRef.current && !isMutedRef.current) {
+          try {
+            recognition.start();
+          } catch (e) {}
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
     } catch (err) {
-      console.error("Failed to queue audio buffer chunk:", err);
+      console.warn("Failed to initialize speech recognition:", err);
     }
   };
 
-  // Interruption: immediate cutoff of playback
-  const clearAudioQueue = () => {
-    if (speakingTimerRef.current) {
-      clearTimeout(speakingTimerRef.current);
-      speakingTimerRef.current = null;
+  // Handle user speech query -> Call secure /api/chat route
+  const handleUserQuery = async (queryText: string) => {
+    if (!queryText.trim()) return;
+
+    // Stop speaking immediately if user interrupts
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
     }
     isAiSpeakingRef.current = false;
-    setMicStatus("idle");
 
-    activeSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {}
-    });
-    activeSourcesRef.current = [];
-    nextPlayTimeRef.current = 0;
+    // Add user message to transcript
+    const userMsg: Message = {
+      id: String(Date.now()),
+      type: "user",
+      content: queryText,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setMicStatus("thinking");
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: queryText,
+          history: messages.slice(-4), // Contextual history
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API returned ${res.status}`);
+      }
+
+      const data = await res.json();
+      const reply = data.reply || "I am here! How can I help you today?";
+
+      // Add AI reply to transcript
+      const aiMsg: Message = {
+        id: String(Date.now() + 1),
+        type: "agent",
+        content: reply,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+
+      // Speak aloud through zero-lag voice driver
+      speakAiResponse(reply);
+    } catch (error) {
+      console.error("Failed to query AI chat:", error);
+      const fallbackMsg: Message = {
+        id: String(Date.now() + 1),
+        type: "agent",
+        content: "I am a Software Engineer at Thoughtline with 1+ year of full-stack experience in React, Node, and AI. What would you like to know about my work?",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, fallbackMsg]);
+      speakAiResponse(fallbackMsg.content);
+    }
   };
 
-  // Connect Call: Initializes Web Audio & Multi-Protocol WebSocket
-  const connectCall = async () => {
+  const connectCall = () => {
     setCallState("connected");
-    setMicStatus("connecting");
+    setMicStatus("speaking");
+    startSpectrumAnimation();
 
-    // Force resume AudioContext
-    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch((e) => console.warn("Failed to resume AudioContext in connectCall:", e));
-    }
-
-    // Set up Analyser node
-    if (audioContextRef.current && !analyserRef.current) {
-      const analyser = audioContextRef.current.createAnalyser();
-      analyser.fftSize = 64;
-      analyser.smoothingTimeConstant = 0.8;
-      analyserRef.current = analyser;
-    }
-    startVisualizer();
-
-    const greeting = "Hello! I am Abhinav R Pillai. How can I help you today?";
-    const greetingMessage: Message = {
+    const initialGreeting = "Hello! I am Abhinav R Pillai. How can I help you today?";
+    const greetingMsg: Message = {
       id: "greeting",
       type: "agent",
-      content: greeting,
+      content: initialGreeting,
       timestamp: new Date(),
     };
 
-    if (hasMicErrorRef.current) {
-      const warningMessage: Message = {
-        id: "mic-warning",
-        type: "agent",
-        content: "Microphone blocked or not available. You can tap the topic chips or use the keyboard to chat with me!",
-        timestamp: new Date(),
-      };
-      setMessages([greetingMessage, warningMessage]);
-      setMicStatus("error");
-    } else {
-      setMessages([greetingMessage]);
-    }
-
-    if (typeof window === "undefined") return;
-
-    // Determine best WebSocket URL:
-    // 1. If NEXT_PUBLIC_AI_WS_URL configured, use it
-    // 2. If running locally with backend proxy alive, use ws://localhost:3005/web-stream
-    // 3. Otherwise, fetch Gemini session token from /api/gemini-token and connect DIRECTLY to Gemini Live!
-    let targetWsUrl = process.env.NEXT_PUBLIC_AI_WS_URL?.trim();
-    let isDirectGemini = false;
-    let apiKey = "";
-    let systemInstruction = "";
-
-    try {
-      const res = await fetch("/api/gemini-token");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.apiKey) {
-          apiKey = data.apiKey;
-          systemInstruction = data.systemInstruction || "";
-        }
-      }
-    } catch (e) {
-      console.warn("Could not fetch gemini token, falling back to local proxy", e);
-    }
-
-    const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-    if (!targetWsUrl) {
-      if (isLocal) {
-        targetWsUrl = `ws://${window.location.hostname}:3005/web-stream`;
-      } else if (apiKey) {
-        // Direct Client-to-Gemini Multimodal Live API (Sub-200ms latency on Netlify/Mobile!)
-        targetWsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
-        isDirectGemini = true;
-      } else {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        targetWsUrl = `${protocol}//${window.location.host}/web-stream`;
-      }
-    }
-
-    isDirectGeminiWsRef.current = isDirectGemini;
-    console.log("Connecting AI Voice Stream to:", isDirectGemini ? "Google Gemini Multimodal Live API (Direct)" : targetWsUrl);
-
-    try {
-      const socket = new WebSocket(targetWsUrl);
-      socket.binaryType = "arraybuffer";
-      socketRef.current = socket;
-
-      socket.onopen = () => {
-        console.log("Connected to AI Voice stream!");
-        setMicStatus("listening");
-
-        // If direct Gemini Live connection, send initial setup handshake
-        if (isDirectGeminiWsRef.current) {
-          const setupMsg = {
-            setup: {
-              model: "models/gemini-2.5-flash-native-audio-latest",
-              inputAudioTranscription: {},
-              outputAudioTranscription: {},
-              realtimeInputConfig: {
-                automaticActivityDetection: {
-                  disabled: false,
-                  silenceDurationMs: 850,
-                },
-              },
-              generationConfig: {
-                responseModalities: ["AUDIO"],
-                temperature: 0.4,
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: {
-                      voiceName: "Puck",
-                    },
-                  },
-                },
-              },
-              systemInstruction: {
-                parts: [{ text: systemInstruction }],
-              },
-            },
-          };
-          socket.send(JSON.stringify(setupMsg));
-        }
-
-        // Initialize low-latency microphone capture with echo ducking
-        if (audioContextRef.current && micStreamRef.current) {
-          try {
-            const audioCtx = audioContextRef.current;
-            const mediaSource = audioCtx.createMediaStreamSource(micStreamRef.current);
-            mediaStreamSourceRef.current = mediaSource;
-
-            // Buffer size 2048: cuts input latency from 171ms down to ~42ms!
-            const scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
-            mediaSource.connect(scriptNode);
-
-            const mutedMonitor = audioCtx.createGain();
-            mutedMonitor.gain.value = 0;
-            scriptNode.connect(mutedMonitor);
-            mutedMonitor.connect(audioCtx.destination);
-            scriptProcessorRef.current = scriptNode;
-
-            scriptNode.onaudioprocess = (e) => {
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && !isMutedRef.current) {
-                const inputData = e.inputBuffer.getChannelData(0);
-
-                let sum = 0;
-                for (let i = 0; i < inputData.length; i++) {
-                  sum += inputData[i] * inputData[i];
-                }
-                const rms = Math.sqrt(sum / inputData.length);
-
-                // Acoustic Echo Ducking:
-                // When AI is actively speaking, raise RMS gate threshold to 0.09
-                // so speaker audio never leaks into mic to cause false barge-in interruptions!
-                const activeThreshold = isAiSpeakingRef.current ? 0.09 : 0.015;
-
-                if (rms > activeThreshold) {
-                  if (!isAiSpeakingRef.current) {
-                    setMicStatus("listening");
-                  }
-
-                  const resampled = resampleBuffer(inputData, audioCtx.sampleRate, 16000);
-                  const pcm16 = float32ToPcm16(resampled);
-
-                  if (isDirectGeminiWsRef.current) {
-                    // Direct Gemini format: base64 in JSON realtimeInput
-                    const uint8 = new Uint8Array(pcm16);
-                    let binaryStr = "";
-                    for (let i = 0; i < uint8.length; i++) {
-                      binaryStr += String.fromCharCode(uint8[i]);
-                    }
-                    const base64Audio = window.btoa(binaryStr);
-                    socketRef.current.send(
-                      JSON.stringify({
-                        realtimeInput: {
-                          mediaChunks: [{ mimeType: "audio/pcm", data: base64Audio }],
-                        },
-                      })
-                    );
-                  } else {
-                    // Proxy format: raw binary ArrayBuffer
-                    socketRef.current.send(pcm16);
-                  }
-                } else {
-                  if (!isAiSpeakingRef.current) {
-                    setMicStatus("idle");
-                  }
-                }
-              }
-            };
-          } catch (err) {
-            console.warn("Failed to set up microphone processor:", err);
-          }
-        }
-      };
-
-      socket.onmessage = (event) => {
-        if (typeof event.data === "string") {
-          try {
-            const data = JSON.parse(event.data);
-
-            // Handle Direct Gemini Live API messages
-            if (isDirectGeminiWsRef.current) {
-              // Trigger initial greeting when setup is complete
-              if (data.setupComplete) {
-                const greetingCmd = {
-                  clientContent: {
-                    turns: [
-                      {
-                        role: "user",
-                        parts: [
-                          {
-                            text: "Hello! Please start the call immediately by saying: 'Hello! I am Abhinav R Pillai. How can I help you today?' in a warm, friendly voice.",
-                          },
-                        ],
-                      },
-                    ],
-                    turnComplete: true,
-                  },
-                };
-                socket.send(JSON.stringify(greetingCmd));
-              }
-
-              // Barge-in interruption
-              if (data.serverContent?.interrupted) {
-                clearAudioQueue();
-              }
-
-              // Output spoken audio from Gemini
-              if (data.serverContent?.modelTurn?.parts) {
-                for (const part of data.serverContent.modelTurn.parts) {
-                  if (part.inlineData?.data) {
-                    const audioBuffer = base64ToArrayBuffer(part.inlineData.data);
-                    const float32 = pcm16ToFloat32(audioBuffer);
-                    queueAudioChunk(float32);
-                  }
-                }
-              }
-
-              // Spoken transcripts
-              if (data.serverContent?.outputTranscription?.text) {
-                const text = data.serverContent.outputTranscription.text;
-                appendTranscript("agent", text);
-              }
-              if (data.inputTranscription?.text) {
-                const text = data.inputTranscription.text;
-                appendTranscript("user", text);
-              }
-            } else {
-              // Proxy protocol
-              if (data.event === "clear") {
-                clearAudioQueue();
-              } else if (data.event === "transcription") {
-                appendTranscript(data.sender === "user" ? "user" : "agent", data.text);
-              }
-            }
-          } catch (e) {
-            console.error("Error parsing WebSocket message:", e);
-          }
-        } else {
-          // Binary 24kHz PCM from Proxy
-          const float32Audio = pcm16ToFloat32(event.data);
-          queueAudioChunk(float32Audio);
-          setMicStatus("speaking");
-        }
-      };
-
-      socket.onerror = (err) => {
-        console.warn("WebSocket error:", err);
-      };
-
-      socket.onclose = () => {
-        console.log("WebSocket stream closed.");
-      };
-    } catch (e) {
-      console.error("Error creating WebSocket:", e);
-    }
-  };
-
-  const appendTranscript = (sender: "user" | "agent", text: string) => {
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.type === sender) {
-        return [
-          ...prev.slice(0, -1),
-          {
-            ...last,
-            content: text,
-          },
-        ];
-      }
-      return [
-        ...prev,
-        {
-          id: String(Date.now() + Math.random()),
-          type: sender,
-          content: text,
-          timestamp: new Date(),
-        },
-      ];
-    });
+    setMessages([greetingMsg]);
+    speakAiResponse(initialGreeting);
   };
 
   const startCall = async () => {
-    hasMicErrorRef.current = false;
     setHasMicError(false);
 
-    // Request microphone
+    // Request microphone permission cleanly
     if (typeof navigator !== "undefined" && navigator.mediaDevices) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-          },
-        });
-        micStreamRef.current = stream;
+        await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (err) {
-        console.warn("Microphone permission denied:", err);
-        hasMicErrorRef.current = true;
+        console.warn("Microphone permission not granted:", err);
         setHasMicError(true);
       }
-    } else {
-      hasMicErrorRef.current = true;
-      setHasMicError(true);
     }
 
     setCallState("ringing");
     setDuration(0);
     setMessages([]);
+    setLiveInterimText("");
     setIsOpen(true);
 
-    // Stop background music
     document.dispatchEvent(new CustomEvent("stop-bg-music"));
 
     const AudioContextClass =
@@ -673,17 +429,17 @@ export default function AIAgent() {
     if (AudioContextClass) {
       const ctx = new AudioContextClass();
       audioContextRef.current = ctx;
-      ctx.resume().catch((e) => console.warn("Failed to resume AudioContext in startCall:", e));
+      ctx.resume().catch((e) => console.warn(e));
 
       const t = ctx.currentTime;
       playRingTone(ctx, t);
-      playRingTone(ctx, t + 2.0);
+      playRingTone(ctx, t + 1.8);
     }
 
     ringingTimeoutRef.current = setTimeout(() => {
       stopRingingSound();
       connectCall();
-    }, 3800);
+    }, 3400);
   };
 
   const endCall = () => {
@@ -691,46 +447,26 @@ export default function AIAgent() {
     setIsOpen(false);
     setShowChat(false);
     setMicStatus("idle");
-    hasMicErrorRef.current = false;
+    setLiveInterimText("");
     setHasMicError(false);
 
     if (ringingTimeoutRef.current) {
       clearTimeout(ringingTimeoutRef.current);
       ringingTimeoutRef.current = null;
     }
-
     stopRingingSound();
 
-    if (socketRef.current) {
-      try {
-        socketRef.current.close();
-      } catch (e) {}
-      socketRef.current = null;
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
     }
+    isAiSpeakingRef.current = false;
 
-    if (scriptProcessorRef.current) {
+    if (recognitionRef.current) {
       try {
-        scriptProcessorRef.current.onaudioprocess = null;
-        scriptProcessorRef.current.disconnect();
+        recognitionRef.current.stop();
       } catch (e) {}
-      scriptProcessorRef.current = null;
+      recognitionRef.current = null;
     }
-
-    if (mediaStreamSourceRef.current) {
-      try {
-        mediaStreamSourceRef.current.disconnect();
-      } catch (e) {}
-      mediaStreamSourceRef.current = null;
-    }
-
-    if (micStreamRef.current) {
-      try {
-        micStreamRef.current.getTracks().forEach((track) => track.stop());
-      } catch (e) {}
-      micStreamRef.current = null;
-    }
-
-    clearAudioQueue();
 
     if (audioContextRef.current) {
       try {
@@ -747,66 +483,15 @@ export default function AIAgent() {
     document.dispatchEvent(new CustomEvent("resume-bg-music"));
   };
 
-  const handleUserSpeech = async (text: string) => {
-    const userMessage: Message = {
-      id: String(Date.now()),
-      type: "user",
-      content: text,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
-
-    // Send payload directly to WebSocket
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      try {
-        if (isDirectGeminiWsRef.current) {
-          socketRef.current.send(
-            JSON.stringify({
-              clientContent: {
-                turns: [{ role: "user", parts: [{ text }] }],
-                turnComplete: true,
-              },
-            })
-          );
-        } else {
-          socketRef.current.send(JSON.stringify({ event: "chat", text }));
-        }
-      } catch (e) {}
-    } else {
-      // Offline fallback: Use Next.js /api/chat route
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text }),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.reply) {
-            appendTranscript("agent", json.reply);
-          }
-        }
-      } catch (e) {}
-    }
-  };
-
   const handleTextSubmit = () => {
     if (!inputValue.trim()) return;
     const text = inputValue;
-
-    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch((e) => console.warn(e));
-    }
-
     setInputValue("");
-    handleUserSpeech(text);
+    handleUserQuery(text);
   };
 
   const handleTopicClick = (prompt: string) => {
-    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch((e) => console.warn(e));
-    }
-    handleUserSpeech(prompt);
+    handleUserQuery(prompt);
   };
 
   const formatDuration = (seconds: number) => {
@@ -849,21 +534,21 @@ export default function AIAgent() {
             ref={chatContainerRef}
             className="fixed inset-0 sm:inset-auto sm:bottom-20 sm:right-6 z-[9998] sm:w-[380px] sm:h-[650px] bg-[#030712] sm:bg-slate-950/95 sm:border sm:border-blue-500/30 sm:rounded-[42px] shadow-2xl sm:shadow-blue-500/10 flex flex-col justify-between overflow-hidden sm:backdrop-blur-2xl"
           >
-            {/* Ambient Background Lights */}
+            {/* Ambient Lights */}
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
               <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-64 h-64 bg-blue-600/15 rounded-full blur-3xl animate-pulse" />
               <div className="absolute bottom-1/3 left-1/2 -translate-x-1/2 w-72 h-72 bg-purple-600/15 rounded-full blur-3xl" />
               <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
             </div>
 
-            {/* Top Status Bar & Dynamic Island */}
+            {/* Dynamic Island Status Bar */}
             <div className="relative z-10 w-full pt-4 px-6 flex items-center justify-between text-slate-400 text-[11px] font-mono select-none">
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-white tracking-wide">
                   {callState === "connected" ? formatDuration(duration) : "00:00"}
                 </span>
                 <span className="w-1 h-1 rounded-full bg-slate-600" />
-                <span className="text-[10px] text-blue-400 font-sans font-semibold">HD Voice</span>
+                <span className="text-[10px] text-emerald-400 font-sans font-semibold">Edge Voice</span>
               </div>
 
               {/* Dynamic Island Notch */}
@@ -892,7 +577,7 @@ export default function AIAgent() {
             <div className="relative z-10 text-center mt-3 px-6">
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-400 text-[10px] font-medium tracking-wide">
                 <Sparkles className="w-3 h-3 text-blue-400" />
-                <span>Gemini 2.5 Live Multimodal</span>
+                <span>Zero-Lag Realtime AI</span>
               </div>
               <h2 className="text-white text-xl font-bold tracking-tight mt-2 flex items-center justify-center gap-1.5">
                 <span>Abhinav R Pillai</span>
@@ -906,18 +591,18 @@ export default function AIAgent() {
                   className={cn(
                     "text-[10px] px-3 py-1 rounded-full border font-semibold tracking-wide transition-all duration-300 shadow-sm",
                     micStatus === "speaking" && "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10 animate-pulse",
-                    micStatus === "listening" && "bg-blue-500/15 border-blue-500/40 text-blue-300 shadow-blue-500/10",
+                    micStatus === "listening" && "bg-blue-500/15 border-blue-500/40 text-blue-300 shadow-blue-500/10 animate-pulse",
+                    micStatus === "thinking" && "bg-purple-500/15 border-purple-500/40 text-purple-300 animate-pulse",
                     micStatus === "muted" && "bg-red-500/15 border-red-500/40 text-red-300",
                     micStatus === "error" && "bg-amber-500/15 border-amber-500/40 text-amber-300",
-                    micStatus === "connecting" && "bg-purple-500/15 border-purple-500/40 text-purple-300 animate-pulse",
                     micStatus === "idle" && "bg-slate-800/80 border-slate-700/80 text-slate-300"
                   )}
                 >
-                  {micStatus === "speaking" && "🎙️ AI Speaking..."}
+                  {micStatus === "speaking" && "🎙️ Abhinav Speaking..."}
                   {micStatus === "listening" && "🎧 Listening to you..."}
+                  {micStatus === "thinking" && "⚡ Thinking..."}
                   {micStatus === "muted" && "🔇 Microphone Muted"}
-                  {micStatus === "error" && "⚠️ Mic Off • Use Chat / Chips"}
-                  {micStatus === "connecting" && "⚡ Connecting HD Voice..."}
+                  {micStatus === "error" && "⚠️ Mic Off • Tap Topics / Chat"}
                   {micStatus === "idle" && "✨ Ready to talk"}
                 </span>
               </div>
@@ -926,7 +611,6 @@ export default function AIAgent() {
             {/* Holographic Avatar & Pulse Rings */}
             <div className="relative z-10 flex flex-col items-center justify-center my-3">
               <div className="relative flex items-center justify-center w-36 h-36">
-                {/* Holographic Spinning Rings */}
                 <motion.div
                   animate={{ rotate: 360 }}
                   transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
@@ -938,7 +622,6 @@ export default function AIAgent() {
                   className="absolute inset-2 rounded-full border border-blue-500/20"
                 />
 
-                {/* Animated Voice Glow Rings */}
                 <div
                   className={cn(
                     "absolute inset-3 rounded-full transition-all duration-700",
@@ -950,7 +633,6 @@ export default function AIAgent() {
                   )}
                 />
 
-                {/* Core Avatar Circle */}
                 <div
                   className={cn(
                     "w-24 h-24 rounded-full bg-gradient-to-br flex items-center justify-center border-2 shadow-2xl relative z-10 transition-all duration-500",
@@ -970,7 +652,7 @@ export default function AIAgent() {
                 </div>
               </div>
 
-              {/* Real-Time Audio Frequency Spectrum Bars */}
+              {/* Dynamic 24-Bar Audio Spectrum */}
               <div className="flex items-center justify-center gap-1 mt-3 px-6 h-9 w-full max-w-[280px]">
                 {spectrumBars.map((height, idx) => (
                   <div
@@ -1009,11 +691,11 @@ export default function AIAgent() {
               </div>
             </div>
 
-            {/* Live Transcript Drawer */}
+            {/* Live Transcript & Real-Time Interim Speech */}
             <div className="relative z-10 px-4">
               <div className="bg-slate-900/80 border border-white/5 rounded-2xl p-3 backdrop-blur-md transition-all">
                 <div className="flex items-center justify-between pb-1.5 border-b border-white/5 text-[10px] text-slate-400">
-                  <span className="font-semibold tracking-wide">Live Transcript</span>
+                  <span className="font-semibold tracking-wide">Live Conversation</span>
                   <button
                     onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
                     className="flex items-center gap-0.5 text-blue-400 hover:text-blue-300 font-semibold"
@@ -1029,8 +711,8 @@ export default function AIAgent() {
                     isTranscriptExpanded ? "h-32" : "h-14"
                   )}
                 >
-                  {messages.length === 0 ? (
-                    <p className="text-slate-500 italic text-center py-2">Waiting for connection...</p>
+                  {messages.length === 0 && !liveInterimText ? (
+                    <p className="text-slate-500 italic text-center py-2">Connecting to Abhinav...</p>
                   ) : (
                     <div className="space-y-1.5">
                       {(isTranscriptExpanded ? messages : messages.slice(-2)).map((msg) => (
@@ -1049,6 +731,12 @@ export default function AIAgent() {
                           <span>{msg.content}</span>
                         </div>
                       ))}
+                      {liveInterimText && (
+                        <div className="p-1.5 rounded-lg text-left bg-blue-950/20 text-blue-300/80 italic border border-blue-500/10 animate-pulse">
+                          <span className="font-bold text-[10px] uppercase mr-1">Listening: </span>
+                          <span>{liveInterimText}</span>
+                        </div>
+                      )}
                     </div>
                   )}
                   <div ref={messagesEndRef} />
@@ -1056,9 +744,8 @@ export default function AIAgent() {
               </div>
             </div>
 
-            {/* Controls Bar & Mobile Ergonomics */}
+            {/* Bottom Controls Bar */}
             <div className="relative z-10 w-full px-6 pt-2 pb-6 flex flex-col items-center gap-3">
-              {/* Optional Text Input Field */}
               {showChat && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -1076,7 +763,7 @@ export default function AIAgent() {
                         handleTextSubmit();
                       }
                     }}
-                    placeholder="Type a message or question..."
+                    placeholder="Type a question for Abhinav..."
                     className="flex-1 bg-slate-900 border border-slate-700/80 rounded-2xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors shadow-inner"
                   />
                   <button
@@ -1089,12 +776,21 @@ export default function AIAgent() {
                 </motion.div>
               )}
 
-              {/* Main Call Action Buttons */}
               <div className="flex items-center justify-around w-full max-w-[280px]">
                 {/* Mute Button */}
                 <button
-                  onClick={() => setIsMuted(!isMuted)}
-                  disabled={callState !== "connected" || hasMicError}
+                  onClick={() => {
+                    const next = !isMuted;
+                    setIsMuted(next);
+                    if (next && recognitionRef.current) {
+                      try {
+                        recognitionRef.current.stop();
+                      } catch (e) {}
+                    } else if (!next && !isAiSpeakingRef.current) {
+                      startListening();
+                    }
+                  }}
+                  disabled={callState !== "connected"}
                   className={cn(
                     "w-12 h-12 rounded-full flex items-center justify-center border transition-all duration-200 active:scale-95 shadow-md",
                     isMuted
@@ -1106,7 +802,7 @@ export default function AIAgent() {
                   {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
                 </button>
 
-                {/* Keyboard / Chat Toggle */}
+                {/* Keyboard Chat Toggle */}
                 <button
                   onClick={() => setShowChat(!showChat)}
                   disabled={callState !== "connected"}
@@ -1124,9 +820,12 @@ export default function AIAgent() {
                 {/* Speaker Toggle */}
                 <button
                   onClick={() => {
-                    const nextSpeaker = !isSpeakerOn;
-                    setIsSpeakerOn(nextSpeaker);
-                    if (!nextSpeaker) clearAudioQueue();
+                    const next = !isSpeakerOn;
+                    setIsSpeakerOn(next);
+                    if (!next && typeof window !== "undefined" && "speechSynthesis" in window) {
+                      window.speechSynthesis.cancel();
+                      isAiSpeakingRef.current = false;
+                    }
                   }}
                   disabled={callState !== "connected"}
                   className={cn(
@@ -1140,7 +839,7 @@ export default function AIAgent() {
                   {isSpeakerOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
                 </button>
 
-                {/* End Call Hangup Button */}
+                {/* End Call Button */}
                 <button
                   onClick={endCall}
                   className="w-14 h-14 bg-gradient-to-tr from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-red-600/40 hover:scale-105 active:scale-95 transition-all duration-200"

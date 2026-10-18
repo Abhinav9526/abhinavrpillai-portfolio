@@ -293,7 +293,9 @@ body > canvas {
 }
 
 /* Hide the injected Netlify branding badge on hosted builds. */
+.nl-wrap,
 #nl-badge,
 .nl-badge {
-  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
