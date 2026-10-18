@@ -17,7 +17,7 @@ function MainPage() {
   return (
     <SmoothScroll>
       <ThreeBackground />
-      <main className={cn("relative bg-background dark:bg-transparent canvas-overlay-mode")}>
+      <main className={cn("relative bg-background dark:bg-transparent")}>
         <AudioPlayer />
         <SpotlightGlow />
         <HeroSection />

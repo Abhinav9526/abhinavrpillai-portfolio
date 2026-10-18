@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
 export default function ThreeBackground() {
@@ -7,6 +7,12 @@ export default function ThreeBackground() {
   const mouseRef = useRef({ x: 0, y: 0 });
   const mouseNDC = useRef(new THREE.Vector2(-9999, -9999)); // Normalized device coordinates for Raycasting
   const scrollYRef = useRef(0);
+  const [isDayTime, setIsDayTime] = useState(true);
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    setIsDayTime(hour >= 6 && hour < 18);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -226,8 +232,6 @@ export default function ThreeBackground() {
     };
   }, []);
 
-  const hour = typeof window !== "undefined" ? new Date().getHours() : 12;
-  const isDayTime = hour >= 6 && hour < 18;
   const bgClass = isDayTime ? "bg-[#0f172a]" : "bg-[#030712]";
 
   return (

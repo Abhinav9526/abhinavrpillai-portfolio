@@ -2,11 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body {
+html {
   scroll-behavior: smooth;
-  max-width: 100vw;
+}
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
   overflow-x: hidden;
+  position: relative;
   -webkit-text-size-adjust: 100%;
+}
+
+main {
+  overflow: visible;
 }
 
 /* Touch targets and tap highlight improvements for mobile */
@@ -123,30 +135,6 @@ body > canvas {
   transform: scale(1.02);
 }
 
-@layer utilities {
-  .canvas-overlay-mode {
-    pointer-events: none;
-  }
-
-  .canvas-overlay-mode a,
-  .canvas-overlay-mode button,
-  .canvas-overlay-mode input,
-  .canvas-overlay-mode label,
-  .canvas-overlay-mode select,
-  .canvas-overlay-mode textarea,
-  .canvas-overlay-mode [role="button"],
-  .canvas-overlay-mode p,
-  .canvas-overlay-mode h1,
-  .canvas-overlay-mode h2,
-  .canvas-overlay-mode h3,
-  .canvas-overlay-mode h4,
-  .canvas-overlay-mode h5,
-  .canvas-overlay-mode h6,
-  .canvas-overlay-mode span,
-  .canvas-overlay-mode svg {
-    pointer-events: auto;
-  }
-}
 
 /* Radix ScrollArea wraps its children in a `display: table; min-width: 100%`
    element that shrink-wraps to its widest child. A nowrap node (e.g. a quoted
