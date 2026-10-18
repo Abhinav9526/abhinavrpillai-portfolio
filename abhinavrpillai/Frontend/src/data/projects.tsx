@@ -5,7 +5,7 @@ import { TypographyH3, TypographyP } from "@/components/ui/typography";
 import { ArrowUpRight, ExternalLink, Link2, MoveUpRight } from "lucide-react";
 import Link from "next/link";
 import { ReactNode } from "react";
-import { SiDotnet, SiMicrosoft, SiHtml5, SiCss3, SiBootstrap } from "react-icons/si";
+import { SiHtml5, SiCss3, SiBootstrap } from "react-icons/si";
 
 const BASE_PATH = "/assets/projects-screenshots";
 
@@ -76,6 +76,13 @@ const brand = (title: string, file: string): Skill => ({
   icon: <MaskIcon src={`/assets/logos/${file}`} title={title} />,
 });
 
+const textBadge = (label: string): Skill => ({
+  title: label,
+  bg: "black",
+  fg: "white",
+  icon: <span className="text-[10px] font-black tracking-tight">{label}</span>,
+});
+
 const PROJECT_SKILLS = {
   js: brand("JavaScript", "javascript-mono.svg"),
   ts: brand("TypeScript", "typescript-mono.svg"),
@@ -83,7 +90,7 @@ const PROJECT_SKILLS = {
   node: brand("Node.js", "nodedotjs-mono.svg"),
   mongo: brand("MongoDB", "mongodb-mono.svg"),
   postgres: brand("PostgreSQL", "postgresql-mono.svg"),
-  
+
   // Custom ones using react-icons
   html: {
     title: "HTML5",
@@ -103,24 +110,9 @@ const PROJECT_SKILLS = {
     fg: "white",
     icon: <SiBootstrap />,
   },
-  csharp: {
-    title: "C#",
-    bg: "black",
-    fg: "white",
-    icon: <SiDotnet className="text-sm" />,
-  },
-  aspnet: {
-    title: "ASP.NET",
-    bg: "black",
-    fg: "white",
-    icon: <SiDotnet className="text-sm" />,
-  },
-  mssql: {
-    title: "MS SQL Server",
-    bg: "black",
-    fg: "white",
-    icon: <SiMicrosoft className="text-sm" />,
-  },
+  csharp: textBadge("C#"),
+  aspnet: textBadge("ASP.NET"),
+  mssql: textBadge("SQL"),
 };
 
 export type Project = {
