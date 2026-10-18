@@ -38,7 +38,7 @@ const config = {
   social: {
     twitter: "#",
     linkedin: "https://linkedin.com/in/abhinav-r-pillai-6b7b1a248",
-    instagram: "#",
+    instagram: "https://www.instagram.com/abhinavrpillai/",
     facebook: "#",
     github: "https://github.com/abhinavrpillai",
   },

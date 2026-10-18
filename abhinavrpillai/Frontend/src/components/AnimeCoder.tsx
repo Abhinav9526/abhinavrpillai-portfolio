@@ -481,8 +481,9 @@ export default function AnimeCoder({
             style={{ pointerEvents: "all" }}
             className="pointer-events-auto cursor-pointer"
             onMouseEnter={handleFaceHover}
-            title="Tickle nose to sneeze! 🤧"
-          />
+          >
+            <title>Tickle nose to sneeze! 🤧</title>
+          </circle>
         </motion.g>
 
         {/* ================= LAPTOP & STATIC BASE ================= */}

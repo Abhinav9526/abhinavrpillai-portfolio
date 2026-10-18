@@ -672,7 +672,7 @@ export default function AIAgent() {
                 micStatus === "idle" && "bg-slate-800 border-slate-700 text-slate-400"
               )}>
                 {micStatus === "listening" && "Live Streaming..."}
-                {micStatus === "speaking" && "Gemini Speaking..."}
+                {micStatus === "speaking" && "AI Speaking..."}
                 {micStatus === "muted" && "Muted"}
                 {micStatus === "error" && "Mic Blocked / Secure context needed"}
                 {micStatus === "not-supported" && "Mic not supported"}
@@ -682,7 +682,7 @@ export default function AIAgent() {
             
             {/* Live Connection Mode indicator */}
             <div className="text-[7px] text-slate-500 mt-1 uppercase font-mono tracking-wider select-none">
-              Mode: Multimodal Live Voice (Ultra Low Latency)
+              Mode: Multimodal Live Voice
             </div>
           </div>
 
