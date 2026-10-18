@@ -95,7 +95,9 @@ export default function AIAgent() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const ringingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const ringingGainRef = useRef<GainNode | null>(null);
+  const ringingNodesRef = useRef<AudioNode[]>([]);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const epochRef = useRef<number>(0);
 
   // Live WebSocket & Audio Refs
   const socketRef = useRef<WebSocket | null>(null);
@@ -126,6 +128,9 @@ export default function AIAgent() {
     isMutedRef.current = isMuted;
     isSpeakerOnRef.current = isSpeakerOn;
     callStateRef.current = callState;
+    if (masterGainRef.current) {
+      masterGainRef.current.gain.value = isSpeakerOn ? 1 : 0;
+    }
   }, [isMuted, isSpeakerOn, callState]);
 
   // Duration timer
@@ -202,23 +207,25 @@ export default function AIAgent() {
     osc1.stop(startTime + 1.55);
     osc2.stop(startTime + 1.55);
 
-    ringingGainRef.current = gainNode;
+    ringingNodesRef.current.push(osc1, osc2, gainNode);
   };
 
   const stopRingingSound = () => {
-    if (ringingGainRef.current) {
+    ringingNodesRef.current.forEach((node) => {
       try {
-        ringingGainRef.current.gain.setValueAtTime(0, 0);
-        ringingGainRef.current.disconnect();
+        if ("stop" in node && typeof (node as any).stop === "function") {
+          (node as any).stop();
+        }
+        node.disconnect();
       } catch (e) {}
-      ringingGainRef.current = null;
-    }
+    });
+    ringingNodesRef.current = [];
   };
 
   // Zero-break, smooth timeline jitter buffer for 24kHz Gemini Live audio
   const queueAudioChunk = (float32Data: Float32Array) => {
     if (!audioContextRef.current || audioContextRef.current.state === "closed") return;
-    if (!isSpeakerOnRef.current || !float32Data || float32Data.length === 0) return;
+    if (!float32Data || float32Data.length === 0) return;
 
     const audioCtx = audioContextRef.current;
     if (audioCtx.state === "suspended") {
@@ -239,28 +246,20 @@ export default function AIAgent() {
       const source = audioCtx.createBufferSource();
       source.buffer = audioBuffer;
 
-      const gainNode = audioCtx.createGain();
-      gainNode.gain.value = 1;
-
-      source.connect(gainNode);
-      if (analyserRef.current) {
-        gainNode.connect(analyserRef.current);
-        analyserRef.current.connect(audioCtx.destination);
+      // Route through single permanent master gain -> analyser -> destination
+      if (masterGainRef.current) {
+        source.connect(masterGainRef.current);
       } else {
-        gainNode.connect(audioCtx.destination);
+        source.connect(audioCtx.destination);
       }
 
       const curTime = audioCtx.currentTime;
 
-      // Ensure AudioContext is running
-      if (audioCtx.state === "suspended") {
-        audioCtx.resume().catch((e) => console.warn(e));
-      }
-
-      // Dynamic sync & jitter control:
-      // If playback fell behind or drifted more than 350ms ahead, resync to immediate 40ms lead
-      if (nextPlayTimeRef.current < curTime || nextPlayTimeRef.current > curTime + 0.35) {
-        nextPlayTimeRef.current = curTime + 0.04;
+      // Sequential audio chunk scheduling:
+      // If playback is not running or timeline has fallen behind, start with a 30ms lead.
+      // Subsequent chunks seamlessly append end-to-end (NEVER reset into the past or overlap).
+      if (nextPlayTimeRef.current < curTime) {
+        nextPlayTimeRef.current = curTime + 0.03;
       }
 
       source.start(nextPlayTimeRef.current);
@@ -288,6 +287,7 @@ export default function AIAgent() {
   };
 
   const clearAudioQueue = () => {
+    epochRef.current += 1;
     if (speakingTimerRef.current) {
       clearTimeout(speakingTimerRef.current);
       speakingTimerRef.current = null;
@@ -298,6 +298,7 @@ export default function AIAgent() {
     activeSourcesRef.current.forEach((source) => {
       try {
         source.stop();
+        source.disconnect();
       } catch (e) {}
     });
     activeSourcesRef.current = [];
@@ -305,19 +306,62 @@ export default function AIAgent() {
   };
 
   const connectCall = async () => {
+    // Clean up any existing socket or stray audio queue to prevent multiple voices
+    if (socketRef.current) {
+      try {
+        socketRef.current.close();
+      } catch (e) {}
+      socketRef.current = null;
+    }
+    clearAudioQueue();
+
     setCallState("connected");
     setMicStatus("connecting");
 
-    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch((e) => console.warn(e));
+    const audioCtx = audioContextRef.current;
+    if (audioCtx) {
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().catch((e) => console.warn(e));
+      }
+
+      if (!analyserRef.current) {
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 64;
+        analyser.smoothingTimeConstant = 0.8;
+        analyserRef.current = analyser;
+      }
+
+      if (!masterGainRef.current) {
+        const masterGain = audioCtx.createGain();
+        masterGain.gain.value = isSpeakerOnRef.current ? 1 : 0;
+        if (analyserRef.current) {
+          masterGain.connect(analyserRef.current);
+          analyserRef.current.connect(audioCtx.destination);
+        } else {
+          masterGain.connect(audioCtx.destination);
+        }
+        masterGainRef.current = masterGain;
+      }
     }
 
-    if (audioContextRef.current && !analyserRef.current) {
-      const analyser = audioContextRef.current.createAnalyser();
-      analyser.fftSize = 64;
-      analyser.smoothingTimeConstant = 0.8;
-      analyserRef.current = analyser;
+    // Ensure microphone stream is active and alive
+    if ((!micStreamRef.current || !micStreamRef.current.active) && typeof navigator !== "undefined" && navigator.mediaDevices) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+        micStreamRef.current = stream;
+      } catch (err) {
+        console.warn("Could not acquire microphone stream:", err);
+        setHasMicError(true);
+      }
     }
+
     startVisualizer();
 
     const greeting = "Connecting to Abhinav's Realtime Gemini Voice Agent...";
@@ -366,24 +410,28 @@ export default function AIAgent() {
         // Microphone streaming to Render
         if (audioContextRef.current && micStreamRef.current) {
           try {
-            const audioCtx = audioContextRef.current;
-            if (audioCtx.state === "suspended") {
-              audioCtx.resume().catch((e) => console.warn(e));
+            const ctx = audioContextRef.current;
+            if (ctx.state === "suspended") {
+              ctx.resume().catch((e) => console.warn(e));
             }
 
-            const mediaSource = audioCtx.createMediaStreamSource(micStreamRef.current);
+            const mediaSource = ctx.createMediaStreamSource(micStreamRef.current);
             mediaStreamSourceRef.current = mediaSource;
 
-            const scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
+            const scriptNode = ctx.createScriptProcessor(2048, 1, 1);
             mediaSource.connect(scriptNode);
 
-            const mutedMonitor = audioCtx.createGain();
-            mutedMonitor.gain.value = 0;
-            scriptNode.connect(mutedMonitor);
-            mutedMonitor.connect(audioCtx.destination);
+            // Directly connect scriptNode to destination so Chromium keeps calling onaudioprocess continuously
+            scriptNode.connect(ctx.destination);
             scriptProcessorRef.current = scriptNode;
 
+            let lastBargeInTime = 0;
+
             scriptNode.onaudioprocess = (e) => {
+              // 1. Always fill output buffer with 0 to prevent mic loopback to speakers
+              const out = e.outputBuffer.getChannelData(0);
+              out.fill(0);
+
               if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && !isMutedRef.current) {
                 const inputData = e.inputBuffer.getChannelData(0);
 
@@ -392,30 +440,31 @@ export default function AIAgent() {
                   sum += inputData[i] * inputData[i];
                 }
                 const rms = Math.sqrt(sum / inputData.length);
+                const now = Date.now();
 
-                // Barge-in (Interruption) handling:
-                // If AI is answering and user speaks (rms > 0.015), immediately halt local playback and send voice to Gemini!
-                if (isAiSpeakingRef.current) {
-                  if (rms > 0.015) {
+                // 2. Barge-in (Interruption):
+                // If user speaks firmly while AI is answering, immediately halt local AI audio
+                if (isAiSpeakingRef.current && rms > 0.02) {
+                  if (now - lastBargeInTime > 600) {
+                    lastBargeInTime = now;
                     clearAudioQueue();
-                  } else {
-                    return; // Duck quiet speaker acoustic feedback
+                    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                      socketRef.current.send(JSON.stringify({ event: "interrupt" }));
+                    }
                   }
                 }
 
-                // Update visual status
-                if (rms > 0.003) {
+                // 3. Update visual status indicator
+                if (rms > 0.005) {
                   if (!isAiSpeakingRef.current) {
                     setMicStatus("listening");
                   }
-                } else {
-                  if (!isAiSpeakingRef.current) {
-                    setMicStatus("idle");
-                  }
+                } else if (!isAiSpeakingRef.current) {
+                  setMicStatus("idle");
                 }
 
-                // Send 16kHz PCM audio chunk to Gemini on Render
-                const resampled = resampleBuffer(inputData, audioCtx.sampleRate, 16000);
+                // 4. Continuously stream 16kHz PCM audio chunk to Gemini on Render
+                const resampled = resampleBuffer(inputData, ctx.sampleRate, 16000);
                 const pcm16 = float32ToPcm16(resampled);
                 socketRef.current.send(pcm16);
               }
@@ -440,15 +489,20 @@ export default function AIAgent() {
           }
         } else {
           // Binary 24kHz PCM from Gemini Live via Render (handles both ArrayBuffer and Blob)
+          const targetEpoch = epochRef.current;
           let arrayBuffer: ArrayBuffer;
           if (event.data instanceof Blob) {
             arrayBuffer = await event.data.arrayBuffer();
           } else {
             arrayBuffer = event.data;
           }
+          // If clearAudioQueue was called while waiting for arrayBuffer, discard the stale chunk!
+          if (epochRef.current !== targetEpoch) return;
+
           const float32Audio = pcm16ToFloat32(arrayBuffer);
-          queueAudioChunk(float32Audio);
-          setMicStatus("speaking");
+          if (float32Audio.length > 0) {
+            queueAudioChunk(float32Audio);
+          }
         }
       };
 
@@ -490,6 +544,7 @@ export default function AIAgent() {
   };
 
   const startCall = async () => {
+    if (callStateRef.current !== "idle") return; // Prevent double call
     setHasMicError(false);
 
     if (typeof navigator !== "undefined" && navigator.mediaDevices) {
@@ -518,6 +573,15 @@ export default function AIAgent() {
 
     document.dispatchEvent(new CustomEvent("stop-bg-music"));
 
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch (e) {}
+      audioContextRef.current = null;
+    }
+    masterGainRef.current = null;
+    analyserRef.current = null;
+
     const AudioContextClass =
       typeof window !== "undefined" ? window.AudioContext || (window as any).webkitAudioContext : null;
 
@@ -531,6 +595,9 @@ export default function AIAgent() {
       playRingTone(ctx, t + 1.8);
     }
 
+    if (ringingTimeoutRef.current) {
+      clearTimeout(ringingTimeoutRef.current);
+    }
     ringingTimeoutRef.current = setTimeout(() => {
       stopRingingSound();
       connectCall();
@@ -580,6 +647,20 @@ export default function AIAgent() {
     }
 
     clearAudioQueue();
+
+    if (masterGainRef.current) {
+      try {
+        masterGainRef.current.disconnect();
+      } catch (e) {}
+      masterGainRef.current = null;
+    }
+
+    if (analyserRef.current) {
+      try {
+        analyserRef.current.disconnect();
+      } catch (e) {}
+      analyserRef.current = null;
+    }
 
     if (audioContextRef.current) {
       try {

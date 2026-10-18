@@ -161,7 +161,7 @@ wss.on('connection', (ws, req) => {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
-            silenceDurationMs: 250 // 250ms for instantaneous human response without lag
+            silenceDurationMs: 600 // 600ms allows natural human conversation pauses without premature cutoff
           }
         },
         generationConfig: {
@@ -234,8 +234,26 @@ wss.on('connection', (ws, req) => {
         geminiWs.send(JSON.stringify(greetingMessage));
       }
       
-      // Check if Gemini returned audio content
-      if (response.serverContent && response.serverContent.modelTurn) {
+      // Handle interrupt (barge-in) from Gemini FIRST
+      // If the user starts talking, Gemini detects it and sends an interruption signal.
+      // We immediately tell Twilio / Web-client to clear their playback buffers and skip old audio.
+      if (response.serverContent && response.serverContent.interrupted) {
+        console.log('Gemini interrupted. Telling client to clear audio buffer.');
+        if (urlPath === '/media-stream') {
+          const clearMessage = {
+            event: 'clear',
+            streamSid: twilioStreamSid
+          };
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(clearMessage));
+          }
+        } else if (urlPath === '/web-stream') {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ event: 'clear' }));
+          }
+        }
+      } else if (response.serverContent && response.serverContent.modelTurn) {
+        // Check if Gemini returned audio content (only if not interrupted)
         const parts = response.serverContent.modelTurn.parts;
         for (const part of parts) {
           if (part.inlineData && part.inlineData.data) {
@@ -281,26 +299,6 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      // Handle interrupt (barge-in) from Gemini
-      // If the user starts talking, Gemini detects it and sends an interruption signal.
-      // We should tell Twilio / Web-client to clear their playback buffers.
-      if (response.serverContent && response.serverContent.interrupted) {
-        console.log('Gemini interrupted. Telling client to clear audio buffer.');
-        if (urlPath === '/media-stream') {
-          const clearMessage = {
-            event: 'clear',
-            streamSid: twilioStreamSid
-          };
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(clearMessage));
-          }
-        } else if (urlPath === '/web-stream') {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ event: 'clear' }));
-          }
-        }
-      }
-
     } catch (error) {
       console.error('Error handling Gemini message:', error);
     }
@@ -324,7 +322,7 @@ wss.on('connection', (ws, req) => {
           const geminiMessage = {
             realtimeInput: {
               mediaChunks: [{
-                mimeType: 'audio/pcm',
+                mimeType: 'audio/pcm;rate=16000',
                 data: pcm16kBuffer.toString('base64')
               }]
             }
@@ -336,14 +334,27 @@ wss.on('connection', (ws, req) => {
         }
       } else if (urlPath === '/web-stream') {
         // Web Simulator protocol
-        // If it's binary, it's raw 16kHz PCM audio from browser microphone
+        // Determine whether incoming payload is binary PCM audio or JSON control
+        let isAudio = false;
+        let audioBuffer = null;
+
         if (isBinary) {
-          const buffer = Buffer.from(messageData);
+          isAudio = true;
+          audioBuffer = Buffer.from(messageData);
+        } else if (Buffer.isBuffer(messageData)) {
+          // If messageData is a Buffer and does not start with JSON '{' (0x7b), it's binary audio
+          if (messageData.length > 0 && messageData[0] !== 0x7b) {
+            isAudio = true;
+            audioBuffer = messageData;
+          }
+        }
+
+        if (isAudio && audioBuffer && audioBuffer.length > 0) {
           const geminiMessage = {
             realtimeInput: {
               mediaChunks: [{
-                mimeType: 'audio/pcm',
-                data: buffer.toString('base64')
+                mimeType: 'audio/pcm;rate=16000',
+                data: audioBuffer.toString('base64')
               }]
             }
           };
@@ -351,26 +362,36 @@ wss.on('connection', (ws, req) => {
             geminiWs.send(JSON.stringify(geminiMessage));
           }
         } else {
-          // If it's a string, check if it's control JSON
-          const data = JSON.parse(messageData.toString());
-          if (data.event === 'chat') {
-            console.log(`[DEBUG] Forwarding chat message to Gemini: ${data.text}`);
-            const chatMessage = {
-              clientContent: {
-                turns: [
-                  {
-                    role: 'user',
-                    parts: [{ text: data.text }]
-                  }
-                ],
-                turnComplete: true
+          // If it's a string or JSON control frame
+          try {
+            const data = JSON.parse(messageData.toString());
+            if (data.event === 'chat') {
+              console.log(`[DEBUG] Forwarding chat message to Gemini: ${data.text}`);
+              const chatMessage = {
+                clientContent: {
+                  turns: [
+                    {
+                      role: 'user',
+                      parts: [{ text: data.text }]
+                    }
+                  ],
+                  turnComplete: true
+                }
+              };
+              if (geminiWs.readyState === WebSocket.OPEN) {
+                geminiWs.send(JSON.stringify(chatMessage));
               }
-            };
-            if (geminiWs.readyState === WebSocket.OPEN) {
-              geminiWs.send(JSON.stringify(chatMessage));
+            } else if (data.event === 'interrupt') {
+              console.log('Client triggered explicit interrupt barge-in.');
+              // Send clear acknowledgement back to client
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ event: 'clear' }));
+              }
+            } else {
+              console.log('Web-stream control message:', data);
             }
-          } else {
-            console.log('Web-stream control message:', data);
+          } catch (e) {
+            // Not JSON
           }
         }
       }
