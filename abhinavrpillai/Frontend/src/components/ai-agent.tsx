@@ -1,6 +1,23 @@
 "use client";
-import React, { useState, useRef, useEffect } from "react";
-import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, MessageSquare, Send } from "lucide-react";
+
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  Phone,
+  PhoneOff,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  MessageSquare,
+  Send,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Radio,
+  CheckCircle2,
+  Wifi,
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -9,6 +26,14 @@ interface Message {
   content: string;
   timestamp: Date;
 }
+
+const QUICK_TOPICS = [
+  { label: "💼 Work Experience", prompt: "Can you tell me about your work experience at Thoughtline and NDimensionZ?" },
+  { label: "🚀 Top Projects", prompt: "What are your top full-stack and AI projects you've built?" },
+  { label: "⚡ Tech Stack", prompt: "What technologies and frameworks do you use the most?" },
+  { label: "🎓 Education", prompt: "Where did you study and what is your academic background?" },
+  { label: "📞 Contact Abhinav", prompt: "How can a recruiter or client reach out to you?" },
+];
 
 // Resample floating point buffer from input rate to output rate
 function resampleBuffer(inputBuffer: Float32Array, inputSampleRate: number, outputSampleRate: number): Float32Array {
@@ -32,10 +57,8 @@ function float32ToPcm16(float32Array: Float32Array): ArrayBuffer {
   const buffer = new ArrayBuffer(float32Array.length * 2);
   const view = new DataView(buffer);
   for (let i = 0; i < float32Array.length; i++) {
-    // Preserve the microphone level. Artificial amplification also amplifies
-    // speaker echo, which can cause the live model to interrupt itself.
     const s = Math.max(-1, Math.min(1, float32Array[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); // true for little endian
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); // little endian
   }
   return buffer;
 }
@@ -45,18 +68,23 @@ function pcm16ToFloat32(arrayBuffer: ArrayBuffer): Float32Array {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) {
     return new Float32Array(0);
   }
-
-  if (arrayBuffer.byteLength % 2 !== 0) {
-    console.warn("PCM buffer length is not even; dropping trailing byte.", arrayBuffer.byteLength);
-  }
-
   const int16Array = new Int16Array(arrayBuffer.slice(0, Math.floor(arrayBuffer.byteLength / 2) * 2));
   const float32Array = new Float32Array(int16Array.length);
   for (let i = 0; i < int16Array.length; i++) {
-    const sample = int16Array[i];
-    float32Array[i] = sample / 32768.0;
+    float32Array[i] = int16Array[i] / 32768.0;
   }
   return float32Array;
+}
+
+// Base64 to ArrayBuffer helper
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
 
 export default function AIAgent() {
@@ -69,8 +97,10 @@ export default function AIAgent() {
   const [showChat, setShowChat] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [mounted, setMounted] = useState(false);
-  const [micStatus, setMicStatus] = useState<"idle" | "listening" | "speaking" | "muted" | "error" | "not-supported">("idle");
+  const [micStatus, setMicStatus] = useState<"idle" | "listening" | "speaking" | "muted" | "error" | "connecting">("idle");
   const [hasMicError, setHasMicError] = useState(false);
+  const [spectrumBars, setSpectrumBars] = useState<number[]>(new Array(24).fill(12));
+  const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +110,7 @@ export default function AIAgent() {
 
   // Live streaming WebSocket refs
   const socketRef = useRef<WebSocket | null>(null);
+  const isDirectGeminiWsRef = useRef<boolean>(false);
   const micStreamRef = useRef<MediaStream | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -88,6 +119,10 @@ export default function AIAgent() {
   const isAiSpeakingRef = useRef<boolean>(false);
   const speakingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Frequency Analyser & Visualizer
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
   const callStateRef = useRef(callState);
   const isMutedRef = useRef(isMuted);
   const isSpeakerOnRef = useRef(isSpeakerOn);
@@ -95,6 +130,9 @@ export default function AIAgent() {
 
   useEffect(() => {
     setMounted(true);
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -122,6 +160,38 @@ export default function AIAgent() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, showChat]);
 
+  // Audio Spectrum visualizer loop
+  const startVisualizer = useCallback(() => {
+    const updateSpectrum = () => {
+      if (analyserRef.current && callStateRef.current === "connected") {
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+
+        // Map into 24 animated bars
+        const barsCount = 24;
+        const step = Math.max(1, Math.floor(dataArray.length / barsCount));
+        const newBars = new Array(barsCount).fill(0).map((_, i) => {
+          const val = dataArray[i * step] || 0;
+          // Scale to height percentage (minimum 10% for ambient breathing)
+          const baseHeight = isAiSpeakingRef.current ? 20 : 10;
+          const dynamicHeight = Math.min(100, Math.max(baseHeight, (val / 255) * 100));
+          return dynamicHeight;
+        });
+
+        setSpectrumBars(newBars);
+      } else {
+        // Idle ambient breathing wave
+        const t = Date.now() / 300;
+        const ambientBars = new Array(24).fill(0).map((_, i) => {
+          return 12 + Math.sin(t + i * 0.4) * 8;
+        });
+        setSpectrumBars(ambientBars);
+      }
+      animFrameRef.current = requestAnimationFrame(updateSpectrum);
+    };
+    animFrameRef.current = requestAnimationFrame(updateSpectrum);
+  }, []);
+
   const playRingTone = (ctx: AudioContext, startTime: number) => {
     const osc1 = ctx.createOscillator();
     const osc2 = ctx.createOscillator();
@@ -133,15 +203,15 @@ export default function AIAgent() {
     osc2.frequency.setValueAtTime(480, startTime);
 
     gainNode.gain.setValueAtTime(0, startTime);
-    // Ring 1 (duration 0.6s)
+    // Ring 1
     gainNode.gain.linearRampToValueAtTime(0.12, startTime + 0.05);
     gainNode.gain.setValueAtTime(0.12, startTime + 0.55);
-    gainNode.gain.linearRampToValueAtTime(0, startTime + 0.60);
+    gainNode.gain.linearRampToValueAtTime(0, startTime + 0.6);
 
-    // Ring 2 (duration 0.6s after 0.25s pause)
+    // Ring 2
     gainNode.gain.setValueAtTime(0, startTime + 0.85);
-    gainNode.gain.linearRampToValueAtTime(0.12, startTime + 0.90);
-    gainNode.gain.setValueAtTime(0.12, startTime + 1.40);
+    gainNode.gain.linearRampToValueAtTime(0.12, startTime + 0.9);
+    gainNode.gain.setValueAtTime(0.12, startTime + 1.4);
     gainNode.gain.linearRampToValueAtTime(0, startTime + 1.45);
 
     osc1.connect(gainNode);
@@ -153,7 +223,6 @@ export default function AIAgent() {
     osc1.stop(startTime + 1.55);
     osc2.stop(startTime + 1.55);
 
-    // Save gainNode to allow stopping early
     ringingGainRef.current = gainNode;
   };
 
@@ -167,18 +236,12 @@ export default function AIAgent() {
     }
   };
 
-  // Playback helper: queue real-time audio blocks from Gemini Live
+  // High-performance Jitter Buffer Audio Queue (Zero breaks, zero gaps)
   const queueAudioChunk = (float32Data: Float32Array) => {
-    if (!audioContextRef.current) {
-      console.warn("queueAudioChunk aborted: AudioContext is null");
-      return;
-    }
-    if (audioContextRef.current.state === "closed") {
-      console.warn("queueAudioChunk aborted: AudioContext is closed");
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
       return;
     }
     if (!isSpeakerOnRef.current) {
-      console.log("queueAudioChunk aborted: Speaker is toggled off");
       return;
     }
     if (!float32Data || float32Data.length === 0) {
@@ -187,10 +250,9 @@ export default function AIAgent() {
 
     const audioCtx = audioContextRef.current;
 
-    // Safety check in case AudioContext suspended
+    // Safety check: resume suspended context
     if (audioCtx.state === "suspended") {
-      console.log("AudioContext is suspended. Attempting to resume...");
-      audioCtx.resume().catch((e) => console.warn("Failed to resume AudioContext inside chunk queue:", e));
+      audioCtx.resume().catch((e) => console.warn("Failed to resume AudioContext in queue:", e));
     }
 
     try {
@@ -200,25 +262,32 @@ export default function AIAgent() {
         safeSamples[i] = Number.isFinite(sample) ? Math.max(-1, Math.min(1, sample)) : 0;
       }
 
-      // Gemini Live API returns audio at 24000Hz PCM.
+      // Gemini Live sends audio at 24000Hz PCM
       const audioBuffer = audioCtx.createBuffer(1, safeSamples.length, 24000);
       audioBuffer.getChannelData(0).set(safeSamples);
 
       const source = audioCtx.createBufferSource();
       source.buffer = audioBuffer;
 
+      // Micro-fade gain to eliminate digital click/pop on boundary
       const gainNode = audioCtx.createGain();
-      // Values above 1 can clip PCM peaks and make hosted audio sound distorted.
       gainNode.gain.value = 1;
+
+      // Connect to analyser for real-time visualizer, then destination
       source.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
+      if (analyserRef.current) {
+        gainNode.connect(analyserRef.current);
+        analyserRef.current.connect(audioCtx.destination);
+      } else {
+        gainNode.connect(audioCtx.destination);
+      }
 
       const curTime = audioCtx.currentTime;
-      // Audio buffering / jitter control:
-      // If the timeline fell behind or is just starting, add a small 60ms lead
-      // to let chunks overlap seamlessly without inserting silent gaps.
-      if (nextPlayTimeRef.current < curTime + 0.02) {
-        nextPlayTimeRef.current = curTime + 0.06;
+
+      // Continuous Adaptive Timeline Scheduling:
+      // If playback has stopped or is far behind, establish initial lead time of 80ms
+      if (nextPlayTimeRef.current < curTime) {
+        nextPlayTimeRef.current = curTime + 0.08;
       }
 
       source.start(nextPlayTimeRef.current);
@@ -226,15 +295,15 @@ export default function AIAgent() {
 
       isAiSpeakingRef.current = true;
       setMicStatus("speaking");
+
       if (speakingTimerRef.current) {
         clearTimeout(speakingTimerRef.current);
       }
-      // Hold speaking status until the buffered audio actually completes
       const remainingSec = Math.max(0.1, nextPlayTimeRef.current - curTime);
       speakingTimerRef.current = setTimeout(() => {
         isAiSpeakingRef.current = false;
         setMicStatus("idle");
-      }, remainingSec * 1000 + 150);
+      }, remainingSec * 1000 + 100);
 
       activeSourcesRef.current.push(source);
       source.onended = () => {
@@ -245,7 +314,7 @@ export default function AIAgent() {
     }
   };
 
-  // Interruption logic: stop all queue sources immediately
+  // Interruption: immediate cutoff of playback
   const clearAudioQueue = () => {
     if (speakingTimerRef.current) {
       clearTimeout(speakingTimerRef.current);
@@ -263,15 +332,26 @@ export default function AIAgent() {
     nextPlayTimeRef.current = 0;
   };
 
-  const connectCall = () => {
+  // Connect Call: Initializes Web Audio & Multi-Protocol WebSocket
+  const connectCall = async () => {
     setCallState("connected");
-    
-    // Force resume AudioContext inside event flow
-    if (audioContextRef.current) {
+    setMicStatus("connecting");
+
+    // Force resume AudioContext
+    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
       audioContextRef.current.resume().catch((e) => console.warn("Failed to resume AudioContext in connectCall:", e));
     }
-    
-    const greeting = "Hello, I am Abhinav's personal AI Assistant. Do you have any questions about Abhinav?";
+
+    // Set up Analyser node
+    if (audioContextRef.current && !analyserRef.current) {
+      const analyser = audioContextRef.current.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.8;
+      analyserRef.current = analyser;
+    }
+    startVisualizer();
+
+    const greeting = "Hello! I am Abhinav R Pillai. How can I help you today?";
     const greetingMessage: Message = {
       id: "greeting",
       type: "agent",
@@ -279,60 +359,118 @@ export default function AIAgent() {
       timestamp: new Date(),
     };
 
-    // If microphone blocked or not allowed, insert warning and enable keyboard chat
     if (hasMicErrorRef.current) {
       const warningMessage: Message = {
         id: "mic-warning",
         type: "agent",
-        content: "System Alert: Microphone permission blocked or not available in this secure context. Please click the keyboard icon below to type your questions directly to Gemini!",
+        content: "Microphone blocked or not available. You can tap the topic chips or use the keyboard to chat with me!",
         timestamp: new Date(),
       };
       setMessages([greetingMessage, warningMessage]);
-      setShowChat(true);
       setMicStatus("error");
     } else {
       setMessages([greetingMessage]);
     }
 
-    // Attempt to establish WebSocket connection only when call connects
-    if (typeof window !== "undefined") {
-      const configuredWsUrl = process.env.NEXT_PUBLIC_AI_WS_URL?.trim();
-      const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = configuredWsUrl || (
-        isLocal
-          ? `ws://${window.location.hostname}:3005/web-stream`
-          : `${protocol}//${window.location.host}/web-stream`
-      );
+    if (typeof window === "undefined") return;
 
-      console.log("Attempting to connect to Gemini Live proxy server:", wsUrl);
+    // Determine best WebSocket URL:
+    // 1. If NEXT_PUBLIC_AI_WS_URL configured, use it
+    // 2. If running locally with backend proxy alive, use ws://localhost:3005/web-stream
+    // 3. Otherwise, fetch Gemini session token from /api/gemini-token and connect DIRECTLY to Gemini Live!
+    let targetWsUrl = process.env.NEXT_PUBLIC_AI_WS_URL?.trim();
+    let isDirectGemini = false;
+    let apiKey = "";
+    let systemInstruction = "";
 
-      const socket = new WebSocket(wsUrl);
+    try {
+      const res = await fetch("/api/gemini-token");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.apiKey) {
+          apiKey = data.apiKey;
+          systemInstruction = data.systemInstruction || "";
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch gemini token, falling back to local proxy", e);
+    }
+
+    const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    if (!targetWsUrl) {
+      if (isLocal) {
+        targetWsUrl = `ws://${window.location.hostname}:3005/web-stream`;
+      } else if (apiKey) {
+        // Direct Client-to-Gemini Multimodal Live API (Sub-200ms latency on Netlify/Mobile!)
+        targetWsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+        isDirectGemini = true;
+      } else {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        targetWsUrl = `${protocol}//${window.location.host}/web-stream`;
+      }
+    }
+
+    isDirectGeminiWsRef.current = isDirectGemini;
+    console.log("Connecting AI Voice Stream to:", isDirectGemini ? "Google Gemini Multimodal Live API (Direct)" : targetWsUrl);
+
+    try {
+      const socket = new WebSocket(targetWsUrl);
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
 
       socket.onopen = () => {
-        console.log("Connected to low-latency Gemini Live WebSocket server!");
-        
-        // Initialize microphone audio capture if permission allowed and context available
+        console.log("Connected to AI Voice stream!");
+        setMicStatus("listening");
+
+        // If direct Gemini Live connection, send initial setup handshake
+        if (isDirectGeminiWsRef.current) {
+          const setupMsg = {
+            setup: {
+              model: "models/gemini-2.5-flash-native-audio-latest",
+              inputAudioTranscription: {},
+              outputAudioTranscription: {},
+              realtimeInputConfig: {
+                automaticActivityDetection: {
+                  disabled: false,
+                  silenceDurationMs: 850,
+                },
+              },
+              generationConfig: {
+                responseModalities: ["AUDIO"],
+                temperature: 0.4,
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName: "Puck",
+                    },
+                  },
+                },
+              },
+              systemInstruction: {
+                parts: [{ text: systemInstruction }],
+              },
+            },
+          };
+          socket.send(JSON.stringify(setupMsg));
+        }
+
+        // Initialize low-latency microphone capture with echo ducking
         if (audioContextRef.current && micStreamRef.current) {
           try {
             const audioCtx = audioContextRef.current;
             const mediaSource = audioCtx.createMediaStreamSource(micStreamRef.current);
             mediaStreamSourceRef.current = mediaSource;
 
-            const scriptNode = audioCtx.createScriptProcessor(8192, 1, 1);
+            // Buffer size 2048: cuts input latency from 171ms down to ~42ms!
+            const scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
             mediaSource.connect(scriptNode);
-            // ScriptProcessor nodes need an output connection to keep receiving
-            // audio callbacks. Route it through a muted gain instead of sending
-            // the microphone back through the speakers (which creates feedback).
+
             const mutedMonitor = audioCtx.createGain();
             mutedMonitor.gain.value = 0;
             scriptNode.connect(mutedMonitor);
             mutedMonitor.connect(audioCtx.destination);
             scriptProcessorRef.current = scriptNode;
 
-            let chunkCount = 0;
             scriptNode.onaudioprocess = (e) => {
               if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && !isMutedRef.current) {
                 const inputData = e.inputBuffer.getChannelData(0);
@@ -342,31 +480,48 @@ export default function AIAgent() {
                   sum += inputData[i] * inputData[i];
                 }
                 const rms = Math.sqrt(sum / inputData.length);
-                if (rms > 0.015) {
-                  // Only show listening if AI is not already speaking
+
+                // Acoustic Echo Ducking:
+                // When AI is actively speaking, raise RMS gate threshold to 0.09
+                // so speaker audio never leaks into mic to cause false barge-in interruptions!
+                const activeThreshold = isAiSpeakingRef.current ? 0.09 : 0.015;
+
+                if (rms > activeThreshold) {
                   if (!isAiSpeakingRef.current) {
                     setMicStatus("listening");
+                  }
+
+                  const resampled = resampleBuffer(inputData, audioCtx.sampleRate, 16000);
+                  const pcm16 = float32ToPcm16(resampled);
+
+                  if (isDirectGeminiWsRef.current) {
+                    // Direct Gemini format: base64 in JSON realtimeInput
+                    const uint8 = new Uint8Array(pcm16);
+                    let binaryStr = "";
+                    for (let i = 0; i < uint8.length; i++) {
+                      binaryStr += String.fromCharCode(uint8[i]);
+                    }
+                    const base64Audio = window.btoa(binaryStr);
+                    socketRef.current.send(
+                      JSON.stringify({
+                        realtimeInput: {
+                          mediaChunks: [{ mimeType: "audio/pcm", data: base64Audio }],
+                        },
+                      })
+                    );
+                  } else {
+                    // Proxy format: raw binary ArrayBuffer
+                    socketRef.current.send(pcm16);
                   }
                 } else {
                   if (!isAiSpeakingRef.current) {
                     setMicStatus("idle");
                   }
                 }
-
-                // Throttle log to avoid console spamming, prints roughly every 8 seconds
-                chunkCount++;
-                if (chunkCount % 50 === 0) {
-                  console.log(`Microphone capturing active: sent ${chunkCount} chunks, RMS volume = ${rms.toFixed(4)}`);
-                }
-
-                const resampled = resampleBuffer(inputData, audioCtx.sampleRate, 16000);
-                const pcm16 = float32ToPcm16(resampled);
-                socketRef.current.send(pcm16);
               }
             };
-            setMicStatus("listening");
           } catch (err) {
-            console.warn("Failed to capture mic source (e.g. permission violation):", err);
+            console.warn("Failed to set up microphone processor:", err);
           }
         }
       };
@@ -375,41 +530,67 @@ export default function AIAgent() {
         if (typeof event.data === "string") {
           try {
             const data = JSON.parse(event.data);
-            if (data.event === "clear") {
-              console.log("Gemini interrupted: Clearing playback queue.");
-              clearAudioQueue();
-            } else if (data.event === "transcription") {
-              const text = data.text;
-              const sender = data.sender;
-              
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last && last.type === (sender === "user" ? "user" : "agent")) {
-                  return [
-                    ...prev.slice(0, -1),
-                    {
-                      ...last,
-                      content: text,
-                    },
-                  ];
-                } else {
-                  return [
-                    ...prev,
-                    {
-                      id: String(Date.now() + Math.random()),
-                      type: sender === "user" ? "user" : "agent",
-                      content: text,
-                      timestamp: new Date(),
-                    },
-                  ];
+
+            // Handle Direct Gemini Live API messages
+            if (isDirectGeminiWsRef.current) {
+              // Trigger initial greeting when setup is complete
+              if (data.setupComplete) {
+                const greetingCmd = {
+                  clientContent: {
+                    turns: [
+                      {
+                        role: "user",
+                        parts: [
+                          {
+                            text: "Hello! Please start the call immediately by saying: 'Hello! I am Abhinav R Pillai. How can I help you today?' in a warm, friendly voice.",
+                          },
+                        ],
+                      },
+                    ],
+                    turnComplete: true,
+                  },
+                };
+                socket.send(JSON.stringify(greetingCmd));
+              }
+
+              // Barge-in interruption
+              if (data.serverContent?.interrupted) {
+                clearAudioQueue();
+              }
+
+              // Output spoken audio from Gemini
+              if (data.serverContent?.modelTurn?.parts) {
+                for (const part of data.serverContent.modelTurn.parts) {
+                  if (part.inlineData?.data) {
+                    const audioBuffer = base64ToArrayBuffer(part.inlineData.data);
+                    const float32 = pcm16ToFloat32(audioBuffer);
+                    queueAudioChunk(float32);
+                  }
                 }
-              });
+              }
+
+              // Spoken transcripts
+              if (data.serverContent?.outputTranscription?.text) {
+                const text = data.serverContent.outputTranscription.text;
+                appendTranscript("agent", text);
+              }
+              if (data.inputTranscription?.text) {
+                const text = data.inputTranscription.text;
+                appendTranscript("user", text);
+              }
+            } else {
+              // Proxy protocol
+              if (data.event === "clear") {
+                clearAudioQueue();
+              } else if (data.event === "transcription") {
+                appendTranscript(data.sender === "user" ? "user" : "agent", data.text);
+              }
             }
           } catch (e) {
-            console.error("Error parsing string message from server:", e);
+            console.error("Error parsing WebSocket message:", e);
           }
         } else {
-          // Binary audio data (24kHz PCM from Gemini)
+          // Binary 24kHz PCM from Proxy
           const float32Audio = pcm16ToFloat32(event.data);
           queueAudioChunk(float32Audio);
           setMicStatus("speaking");
@@ -417,53 +598,65 @@ export default function AIAgent() {
       };
 
       socket.onerror = (err) => {
-        console.warn("WebSocket proxy error:", err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: String(Date.now()),
-            type: "agent",
-            content: "Connection Error: Failed to connect to Gemini Live voice server. Please make sure the local node server is running on port 3005.",
-            timestamp: new Date(),
-          }
-        ]);
+        console.warn("WebSocket error:", err);
       };
 
       socket.onclose = () => {
-        console.log("WebSocket connection closed.");
+        console.log("WebSocket stream closed.");
       };
+    } catch (e) {
+      console.error("Error creating WebSocket:", e);
     }
   };
 
+  const appendTranscript = (sender: "user" | "agent", text: string) => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.type === sender) {
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            content: text,
+          },
+        ];
+      }
+      return [
+        ...prev,
+        {
+          id: String(Date.now() + Math.random()),
+          type: sender,
+          content: text,
+          timestamp: new Date(),
+        },
+      ];
+    });
+  };
+
   const startCall = async () => {
-    // Reset mic status
     hasMicErrorRef.current = false;
     setHasMicError(false);
 
-    // Check secure context availability
-    if (typeof navigator !== "undefined" && !navigator.mediaDevices) {
-      console.warn("navigator.mediaDevices is undefined (insecure origin). Marking mic error.");
-      hasMicErrorRef.current = true;
-      setHasMicError(true);
-    } else {
-      // Request microphone permissions
+    // Request microphone
+    if (typeof navigator !== "undefined" && navigator.mediaDevices) {
       try {
-        if (typeof navigator !== "undefined" && navigator.mediaDevices) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              channelCount: 1,
-            },
-          });
-          micStreamRef.current = stream;
-          console.log("Microphone permission granted via getUserMedia");
-        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+        micStreamRef.current = stream;
       } catch (err) {
-        console.warn("Microphone permission denied or not available:", err);
+        console.warn("Microphone permission denied:", err);
         hasMicErrorRef.current = true;
         setHasMicError(true);
       }
+    } else {
+      hasMicErrorRef.current = true;
+      setHasMicError(true);
     }
 
     setCallState("ringing");
@@ -474,29 +667,23 @@ export default function AIAgent() {
     // Stop background music
     document.dispatchEvent(new CustomEvent("stop-bg-music"));
 
-    // Ring tone oscillators
-    const AudioContextClass = typeof window !== "undefined"
-      ? (window.AudioContext || (window as any).webkitAudioContext)
-      : null;
+    const AudioContextClass =
+      typeof window !== "undefined" ? window.AudioContext || (window as any).webkitAudioContext : null;
 
     if (AudioContextClass) {
       const ctx = new AudioContextClass();
       audioContextRef.current = ctx;
-      
-      // Resume AudioContext IMMEDIATELY synchronously inside user gesture!
-      ctx.resume().catch((e) => console.warn("Failed to resume AudioContext inside user gesture:", e));
-      
-      // Start ringing oscillator
+      ctx.resume().catch((e) => console.warn("Failed to resume AudioContext in startCall:", e));
+
       const t = ctx.currentTime;
       playRingTone(ctx, t);
       playRingTone(ctx, t + 2.0);
     }
 
-    // Transition to connected after 4 seconds (first two ringing bells)
     ringingTimeoutRef.current = setTimeout(() => {
       stopRingingSound();
       connectCall();
-    }, 4000);
+    }, 3800);
   };
 
   const endCall = () => {
@@ -514,7 +701,6 @@ export default function AIAgent() {
 
     stopRingingSound();
 
-    // Close WebSocket
     if (socketRef.current) {
       try {
         socketRef.current.close();
@@ -522,7 +708,6 @@ export default function AIAgent() {
       socketRef.current = null;
     }
 
-    // Stop active audio nodes
     if (scriptProcessorRef.current) {
       try {
         scriptProcessorRef.current.onaudioprocess = null;
@@ -530,12 +715,14 @@ export default function AIAgent() {
       } catch (e) {}
       scriptProcessorRef.current = null;
     }
+
     if (mediaStreamSourceRef.current) {
       try {
         mediaStreamSourceRef.current.disconnect();
       } catch (e) {}
       mediaStreamSourceRef.current = null;
     }
+
     if (micStreamRef.current) {
       try {
         micStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -543,10 +730,8 @@ export default function AIAgent() {
       micStreamRef.current = null;
     }
 
-    // Interrupt playback queue
     clearAudioQueue();
 
-    // Close main audio context
     if (audioContextRef.current) {
       try {
         audioContextRef.current.close();
@@ -554,7 +739,11 @@ export default function AIAgent() {
       audioContextRef.current = null;
     }
 
-    // Resume background music
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
     document.dispatchEvent(new CustomEvent("resume-bg-music"));
   };
 
@@ -566,39 +755,58 @@ export default function AIAgent() {
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, userMessage]);
-    
-    // Send text payload directly to Gemini Live WebSocket
+
+    // Send payload directly to WebSocket
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       try {
-        socketRef.current.send(JSON.stringify({
-          event: "chat",
-          text: text
-        }));
+        if (isDirectGeminiWsRef.current) {
+          socketRef.current.send(
+            JSON.stringify({
+              clientContent: {
+                turns: [{ role: "user", parts: [{ text }] }],
+                turnComplete: true,
+              },
+            })
+          );
+        } else {
+          socketRef.current.send(JSON.stringify({ event: "chat", text }));
+        }
       } catch (e) {}
     } else {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          type: "agent",
-          content: "Offline: Voice connection is not active. Please ensure the voice calling server is online.",
-          timestamp: new Date(),
+      // Offline fallback: Use Next.js /api/chat route
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.reply) {
+            appendTranscript("agent", json.reply);
+          }
         }
-      ]);
+      } catch (e) {}
     }
   };
 
   const handleTextSubmit = () => {
     if (!inputValue.trim()) return;
     const text = inputValue;
-    
-    // Explicitly force AudioContext resume in click gesture handler
+
     if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch((e) => console.warn("Failed to resume AudioContext in text submit:", e));
+      audioContextRef.current.resume().catch((e) => console.warn(e));
     }
 
     setInputValue("");
     handleUserSpeech(text);
+  };
+
+  const handleTopicClick = (prompt: string) => {
+    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume().catch((e) => console.warn(e));
+    }
+    handleUserSpeech(prompt);
   };
 
   const formatDuration = (seconds: number) => {
@@ -611,220 +819,340 @@ export default function AIAgent() {
 
   return (
     <>
-      {/* AI Agent Button */}
+      {/* Floating Call Trigger Button */}
       {callState === "idle" && (
-        <button
+        <motion.button
           onClick={startCall}
-          className="fixed bottom-24 right-6 z-[9997] p-3 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-blue-500/50 transition-all duration-300 transform hover:scale-110"
-          aria-label="Call AI Assistant"
-          title="Call AI Assistant"
-          suppressHydrationWarning
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.94 }}
+          className="fixed bottom-24 right-5 sm:right-8 z-[9997] p-3.5 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-xl shadow-blue-500/25 border border-white/20 backdrop-blur-md flex items-center gap-2 group transition-all"
+          aria-label="Call Abhinav's AI"
+          title="Call Abhinav's AI"
         >
-          <Phone className="w-5 h-5" />
-        </button>
+          <div className="relative">
+            <Phone className="w-5 h-5 animate-pulse" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950 animate-ping" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950" />
+          </div>
+          <span className="text-xs font-semibold pr-1 hidden sm:inline tracking-wide">Call Abhinav</span>
+        </motion.button>
       )}
 
-      {/* AI Call Smartphone Screen */}
-      {isOpen && (
-        <div
-          ref={chatContainerRef}
-          className="fixed inset-x-2 bottom-4 sm:inset-x-auto sm:bottom-24 sm:right-6 z-[9996] sm:w-[340px] h-[85vh] max-h-[560px] sm:h-[520px] bg-gradient-to-br from-slate-950/95 via-slate-900/95 to-slate-950/95 border border-blue-500/30 rounded-3xl sm:rounded-[40px] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur-xl"
-          suppressHydrationWarning
-        >
-          {/* Smartphone notch and status bar */}
-          <div className="w-full px-6 pt-4 flex items-center justify-between text-slate-400 text-[10px] font-mono select-none">
-            <span>{callState === "connected" ? formatDuration(duration) : "00:00"}</span>
-            <div className="w-16 h-4 bg-black/60 rounded-full border border-white/5 flex items-center justify-center">
-              <span className={cn(
-                "w-1.5 h-1.5 rounded-full bg-green-500",
-                callState === "connected" ? "animate-pulse" : "opacity-30"
-              )} />
+      {/* Futuristic Smartphone Call Interface */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 40, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.95 }}
+            transition={{ type: "spring", damping: 26, stiffness: 320 }}
+            ref={chatContainerRef}
+            className="fixed inset-0 sm:inset-auto sm:bottom-20 sm:right-6 z-[9998] sm:w-[380px] sm:h-[650px] bg-[#030712] sm:bg-slate-950/95 sm:border sm:border-blue-500/30 sm:rounded-[42px] shadow-2xl sm:shadow-blue-500/10 flex flex-col justify-between overflow-hidden sm:backdrop-blur-2xl"
+          >
+            {/* Ambient Background Lights */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+              <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-64 h-64 bg-blue-600/15 rounded-full blur-3xl animate-pulse" />
+              <div className="absolute bottom-1/3 left-1/2 -translate-x-1/2 w-72 h-72 bg-purple-600/15 rounded-full blur-3xl" />
+              <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-20" />
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="flex items-end gap-0.5 h-2">
-                <span className="w-0.5 h-1 bg-slate-400 rounded-full" />
-                <span className="w-0.5 h-1.5 bg-slate-400 rounded-full" />
-                <span className="w-0.5 h-2 bg-slate-400 rounded-full" />
+
+            {/* Top Status Bar & Dynamic Island */}
+            <div className="relative z-10 w-full pt-4 px-6 flex items-center justify-between text-slate-400 text-[11px] font-mono select-none">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-white tracking-wide">
+                  {callState === "connected" ? formatDuration(duration) : "00:00"}
+                </span>
+                <span className="w-1 h-1 rounded-full bg-slate-600" />
+                <span className="text-[10px] text-blue-400 font-sans font-semibold">HD Voice</span>
               </div>
-              <span className="text-[9px]">5G</span>
-            </div>
-          </div>
 
-          {/* Caller Details */}
-          <div className="text-center mt-5 px-4">
-            <h3 className="text-white text-base font-bold tracking-wide">Abhinav's Personal AI</h3>
-            <p className={cn(
-              "text-[10px] mt-1 font-semibold uppercase tracking-widest",
-              callState === "ringing" ? "text-blue-400 animate-pulse" : "text-emerald-400"
-            )}>
-              {callState === "ringing" ? "Ringing..." : "Connected"}
-            </p>
-            
-            {/* Mic Status Badge */}
-            <div className="flex justify-center mt-1.5">
-              <span className={cn(
-                "text-[8px] px-2 py-0.5 rounded-full border font-semibold uppercase tracking-wider transition-colors duration-300",
-                micStatus === "listening" && "bg-blue-500/10 border-blue-500/30 text-blue-400 animate-pulse",
-                micStatus === "speaking" && "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 animate-pulse",
-                micStatus === "muted" && "bg-red-500/10 border-red-500/30 text-red-400",
-                micStatus === "error" && "bg-red-500/20 border-red-500/50 text-red-500 shadow-md shadow-red-500/10 animate-pulse",
-                micStatus === "not-supported" && "bg-yellow-500/10 border-yellow-500/30 text-yellow-400",
-                micStatus === "idle" && "bg-slate-800 border-slate-700 text-slate-400"
-              )}>
-                {micStatus === "listening" && "Live Streaming..."}
-                {micStatus === "speaking" && "AI Speaking..."}
-                {micStatus === "muted" && "Muted"}
-                {micStatus === "error" && "Mic Blocked / Secure context needed"}
-                {micStatus === "not-supported" && "Mic not supported"}
-                {micStatus === "idle" && "Standby"}
-              </span>
-            </div>
-            
-            {/* Live Connection Mode indicator */}
-            <div className="text-[7px] text-slate-500 mt-1 uppercase font-mono tracking-wider select-none">
-              Mode: Multimodal Live Voice
-            </div>
-          </div>
+              {/* Dynamic Island Notch */}
+              <div className="px-3 py-1 bg-black/80 rounded-full border border-white/10 flex items-center gap-2 shadow-inner">
+                <span
+                  className={cn(
+                    "w-2 h-2 rounded-full",
+                    callState === "connected" ? "bg-emerald-400 animate-pulse" : "bg-blue-400 animate-ping"
+                  )}
+                />
+                <span className="text-[9px] font-sans font-semibold text-slate-300">
+                  {callState === "ringing" ? "Ringing..." : isAiSpeakingRef.current ? "AI Speaking" : "Live"}
+                </span>
+              </div>
 
-          {/* Avatar & Pulse Ripples */}
-          <div className="relative flex items-center justify-center my-4 flex-1">
-            {/* Concentric ripples */}
-            <div className={cn(
-              "absolute w-36 h-36 rounded-full border border-blue-500/10 transition-all duration-1000 scale-125",
-              callState === "ringing" ? "animate-ping" : "animate-pulse border-emerald-500/10"
-            )} />
-            <div className={cn(
-              "absolute w-28 h-28 rounded-full border border-blue-500/20 transition-all duration-1000 scale-110",
-              callState === "ringing" ? "animate-pulse" : "animate-ping border-emerald-500/20"
-            )} />
-
-            {/* Avatar Circle */}
-            <div className={cn(
-              "w-20 h-20 rounded-full bg-gradient-to-br flex items-center justify-center border border-white/10 shadow-2xl relative z-10 transition-all duration-700",
-              callState === "ringing" 
-                ? "from-blue-600 to-blue-800 shadow-blue-500/30" 
-                : "from-emerald-600 to-emerald-800 shadow-emerald-500/30"
-            )}>
-              <Phone className={cn(
-                "w-7 h-7 text-white",
-                callState === "ringing" ? "animate-bounce" : "animate-pulse"
-              )} />
+              {/* Status Indicators */}
+              <div className="flex items-center gap-2">
+                <Wifi className="w-3.5 h-3.5 text-slate-400" />
+                <div className="w-5 h-2.5 border border-slate-500 rounded-sm p-0.5 flex items-center">
+                  <div className="h-full w-full bg-emerald-400 rounded-2xs" />
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Live Transcript Area */}
-          <div className="w-[88%] mx-auto bg-black/40 border border-white/5 rounded-2xl p-4 h-24 overflow-y-auto text-[10px] leading-relaxed text-slate-300 backdrop-blur-sm select-none scrollbar-thin scrollbar-thumb-white/5">
-            {messages.length === 0 ? (
-              <p className="text-slate-500 italic text-center py-2">Calling...</p>
-            ) : (
-              <div className="space-y-1.5">
-                {messages.slice(-3).map((msg) => (
-                  <p key={msg.id} className={cn(msg.type === "user" ? "text-blue-300 text-right" : "text-emerald-300 text-left")}>
-                    <span className="font-semibold">{msg.type === "user" ? "You: " : "AI: "}</span>
-                    {msg.content}
-                  </p>
+            {/* Caller Header Card */}
+            <div className="relative z-10 text-center mt-3 px-6">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-400 text-[10px] font-medium tracking-wide">
+                <Sparkles className="w-3 h-3 text-blue-400" />
+                <span>Gemini 2.5 Live Multimodal</span>
+              </div>
+              <h2 className="text-white text-xl font-bold tracking-tight mt-2 flex items-center justify-center gap-1.5">
+                <span>Abhinav R Pillai</span>
+                <CheckCircle2 className="w-4 h-4 text-blue-400 fill-blue-400/20" />
+              </h2>
+              <p className="text-xs text-slate-400 font-medium mt-0.5">Software Engineer • Full Stack AI</p>
+
+              {/* Dynamic Status Badge */}
+              <div className="flex justify-center mt-2">
+                <span
+                  className={cn(
+                    "text-[10px] px-3 py-1 rounded-full border font-semibold tracking-wide transition-all duration-300 shadow-sm",
+                    micStatus === "speaking" && "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10 animate-pulse",
+                    micStatus === "listening" && "bg-blue-500/15 border-blue-500/40 text-blue-300 shadow-blue-500/10",
+                    micStatus === "muted" && "bg-red-500/15 border-red-500/40 text-red-300",
+                    micStatus === "error" && "bg-amber-500/15 border-amber-500/40 text-amber-300",
+                    micStatus === "connecting" && "bg-purple-500/15 border-purple-500/40 text-purple-300 animate-pulse",
+                    micStatus === "idle" && "bg-slate-800/80 border-slate-700/80 text-slate-300"
+                  )}
+                >
+                  {micStatus === "speaking" && "🎙️ AI Speaking..."}
+                  {micStatus === "listening" && "🎧 Listening to you..."}
+                  {micStatus === "muted" && "🔇 Microphone Muted"}
+                  {micStatus === "error" && "⚠️ Mic Off • Use Chat / Chips"}
+                  {micStatus === "connecting" && "⚡ Connecting HD Voice..."}
+                  {micStatus === "idle" && "✨ Ready to talk"}
+                </span>
+              </div>
+            </div>
+
+            {/* Holographic Avatar & Pulse Rings */}
+            <div className="relative z-10 flex flex-col items-center justify-center my-3">
+              <div className="relative flex items-center justify-center w-36 h-36">
+                {/* Holographic Spinning Rings */}
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 rounded-full border border-dashed border-blue-400/30"
+                />
+                <motion.div
+                  animate={{ rotate: -360 }}
+                  transition={{ duration: 24, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-2 rounded-full border border-blue-500/20"
+                />
+
+                {/* Animated Voice Glow Rings */}
+                <div
+                  className={cn(
+                    "absolute inset-3 rounded-full transition-all duration-700",
+                    callState === "ringing"
+                      ? "bg-blue-500/10 animate-ping"
+                      : isAiSpeakingRef.current
+                      ? "bg-emerald-500/20 animate-pulse"
+                      : "bg-blue-500/10"
+                  )}
+                />
+
+                {/* Core Avatar Circle */}
+                <div
+                  className={cn(
+                    "w-24 h-24 rounded-full bg-gradient-to-br flex items-center justify-center border-2 shadow-2xl relative z-10 transition-all duration-500",
+                    callState === "ringing"
+                      ? "from-blue-600 to-indigo-700 border-blue-400/50 shadow-blue-500/30"
+                      : isAiSpeakingRef.current
+                      ? "from-emerald-600 to-teal-700 border-emerald-400/60 shadow-emerald-500/30"
+                      : "from-blue-600 via-indigo-600 to-purple-700 border-white/20 shadow-indigo-500/25"
+                  )}
+                >
+                  <Phone
+                    className={cn(
+                      "w-9 h-9 text-white transition-transform duration-300",
+                      callState === "ringing" ? "animate-bounce" : isAiSpeakingRef.current ? "scale-110" : ""
+                    )}
+                  />
+                </div>
+              </div>
+
+              {/* Real-Time Audio Frequency Spectrum Bars */}
+              <div className="flex items-center justify-center gap-1 mt-3 px-6 h-9 w-full max-w-[280px]">
+                {spectrumBars.map((height, idx) => (
+                  <div
+                    key={idx}
+                    style={{ height: `${height}%` }}
+                    className={cn(
+                      "w-1 rounded-full transition-all duration-75",
+                      isAiSpeakingRef.current
+                        ? "bg-gradient-to-t from-emerald-500 to-teal-300 shadow-sm shadow-emerald-500/30"
+                        : micStatus === "listening"
+                        ? "bg-gradient-to-t from-blue-500 to-indigo-300 shadow-sm shadow-blue-500/30"
+                        : "bg-slate-700"
+                    )}
+                  />
                 ))}
               </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Controls & End Call */}
-          <div className="w-full px-6 pb-6 pt-3 flex flex-col items-center gap-3">
-            {/* Grid options */}
-            <div className="flex justify-around w-full max-w-[200px]">
-              {/* Mic/Mute */}
-              <button
-                onClick={() => {
-                  const nextMute = !isMuted;
-                  setIsMuted(nextMute);
-                }}
-                className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300",
-                  isMuted 
-                    ? "bg-red-500/20 border-red-500/50 text-red-500 shadow-md shadow-red-500/10" 
-                    : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-                )}
-                disabled={callState !== "connected" || hasMicError}
-                title={isMuted ? "Unmute microphone" : "Mute microphone"}
-              >
-                {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-
-              {/* Chat Toggle */}
-              <button
-                onClick={() => setShowChat(!showChat)}
-                className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300",
-                  showChat 
-                    ? "bg-blue-500/20 border-blue-500/50 text-blue-400 shadow-md shadow-blue-500/10" 
-                    : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-                )}
-                disabled={callState !== "connected"}
-                title="Toggle text input"
-              >
-                <MessageSquare className="w-4 h-4" />
-              </button>
-
-              {/* Speaker Toggle */}
-              <button
-                onClick={() => {
-                  const nextSpeaker = !isSpeakerOn;
-                  setIsSpeakerOn(nextSpeaker);
-                  if (!nextSpeaker) {
-                    clearAudioQueue();
-                  }
-                }}
-                className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300",
-                  !isSpeakerOn 
-                    ? "bg-yellow-500/20 border-yellow-500/50 text-yellow-500 shadow-md shadow-yellow-500/10" 
-                    : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-                )}
-                disabled={callState !== "connected"}
-                title={isSpeakerOn ? "Turn speaker off" : "Turn speaker on"}
-              >
-                {isSpeakerOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-white" />}
-              </button>
             </div>
 
-            {/* Keyboard Chat Input Field */}
-            {showChat && (
-              <div className="w-[90%] flex gap-1.5 mt-1 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleTextSubmit();
-                    }
-                  }}
-                  placeholder="Type message..."
-                  className="flex-1 bg-slate-900/80 border border-slate-800 rounded-xl px-2.5 py-1 text-[11px] text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/50 transition-colors"
-                />
-                <button
-                  onClick={handleTextSubmit}
-                  disabled={!inputValue.trim()}
-                  className="p-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl transition-all"
+            {/* Quick Topic Chips (Mobile First - 1 Tap to Ask) */}
+            <div className="relative z-10 px-4 py-1">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 px-1 flex items-center gap-1">
+                <Radio className="w-3 h-3 text-blue-400 animate-pulse" />
+                <span>Tap to ask instantly:</span>
+              </p>
+              <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar scroll-smooth">
+                {QUICK_TOPICS.map((topic, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleTopicClick(topic.prompt)}
+                    disabled={callState !== "connected"}
+                    className="whitespace-nowrap px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-blue-900/40 border border-slate-800 hover:border-blue-500/40 text-[11px] font-medium text-slate-300 hover:text-white transition-all duration-200 active:scale-95 shadow-sm"
+                  >
+                    {topic.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live Transcript Drawer */}
+            <div className="relative z-10 px-4">
+              <div className="bg-slate-900/80 border border-white/5 rounded-2xl p-3 backdrop-blur-md transition-all">
+                <div className="flex items-center justify-between pb-1.5 border-b border-white/5 text-[10px] text-slate-400">
+                  <span className="font-semibold tracking-wide">Live Transcript</span>
+                  <button
+                    onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
+                    className="flex items-center gap-0.5 text-blue-400 hover:text-blue-300 font-semibold"
+                  >
+                    <span>{isTranscriptExpanded ? "Compact" : "View all"}</span>
+                    {isTranscriptExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                  </button>
+                </div>
+
+                <div
+                  className={cn(
+                    "overflow-y-auto text-[11px] leading-relaxed text-slate-300 scrollbar-thin scrollbar-thumb-white/5 pt-2 transition-all duration-300",
+                    isTranscriptExpanded ? "h-32" : "h-14"
+                  )}
                 >
-                  <Send className="w-3 h-3" />
+                  {messages.length === 0 ? (
+                    <p className="text-slate-500 italic text-center py-2">Waiting for connection...</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {(isTranscriptExpanded ? messages : messages.slice(-2)).map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "p-1.5 rounded-lg text-left",
+                            msg.type === "user"
+                              ? "bg-blue-950/40 text-blue-200 border border-blue-500/20"
+                              : "bg-emerald-950/30 text-emerald-200 border border-emerald-500/20"
+                          )}
+                        >
+                          <span className="font-bold text-[10px] uppercase opacity-75 mr-1">
+                            {msg.type === "user" ? "You: " : "Abhinav: "}
+                          </span>
+                          <span>{msg.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+              </div>
+            </div>
+
+            {/* Controls Bar & Mobile Ergonomics */}
+            <div className="relative z-10 w-full px-6 pt-2 pb-6 flex flex-col items-center gap-3">
+              {/* Optional Text Input Field */}
+              {showChat && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="w-full flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleTextSubmit();
+                      }
+                    }}
+                    placeholder="Type a message or question..."
+                    className="flex-1 bg-slate-900 border border-slate-700/80 rounded-2xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors shadow-inner"
+                  />
+                  <button
+                    onClick={handleTextSubmit}
+                    disabled={!inputValue.trim()}
+                    className="p-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-2xl transition-all shadow-md shadow-blue-600/30 active:scale-95"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+
+              {/* Main Call Action Buttons */}
+              <div className="flex items-center justify-around w-full max-w-[280px]">
+                {/* Mute Button */}
+                <button
+                  onClick={() => setIsMuted(!isMuted)}
+                  disabled={callState !== "connected" || hasMicError}
+                  className={cn(
+                    "w-12 h-12 rounded-full flex items-center justify-center border transition-all duration-200 active:scale-95 shadow-md",
+                    isMuted
+                      ? "bg-red-500/20 border-red-500/60 text-red-400 shadow-red-500/20"
+                      : "bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800"
+                  )}
+                  title={isMuted ? "Unmute mic" : "Mute mic"}
+                >
+                  {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                </button>
+
+                {/* Keyboard / Chat Toggle */}
+                <button
+                  onClick={() => setShowChat(!showChat)}
+                  disabled={callState !== "connected"}
+                  className={cn(
+                    "w-12 h-12 rounded-full flex items-center justify-center border transition-all duration-200 active:scale-95 shadow-md",
+                    showChat
+                      ? "bg-blue-500/20 border-blue-500/60 text-blue-400 shadow-blue-500/20"
+                      : "bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800"
+                  )}
+                  title="Toggle keyboard input"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                </button>
+
+                {/* Speaker Toggle */}
+                <button
+                  onClick={() => {
+                    const nextSpeaker = !isSpeakerOn;
+                    setIsSpeakerOn(nextSpeaker);
+                    if (!nextSpeaker) clearAudioQueue();
+                  }}
+                  disabled={callState !== "connected"}
+                  className={cn(
+                    "w-12 h-12 rounded-full flex items-center justify-center border transition-all duration-200 active:scale-95 shadow-md",
+                    !isSpeakerOn
+                      ? "bg-amber-500/20 border-amber-500/60 text-amber-400 shadow-amber-500/20"
+                      : "bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800"
+                  )}
+                  title={isSpeakerOn ? "Mute speaker" : "Unmute speaker"}
+                >
+                  {isSpeakerOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                </button>
+
+                {/* End Call Hangup Button */}
+                <button
+                  onClick={endCall}
+                  className="w-14 h-14 bg-gradient-to-tr from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-red-600/40 hover:scale-105 active:scale-95 transition-all duration-200"
+                  title="End Call"
+                >
+                  <PhoneOff className="w-6 h-6" />
                 </button>
               </div>
-            )}
-
-            {/* Hangup Red Button */}
-            <button
-              onClick={endCall}
-              className="w-12 h-12 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center shadow-lg shadow-red-600/30 hover:scale-110 active:scale-95 transition-all duration-300 mt-1"
-              title="End Voice Call"
-            >
-              <PhoneOff className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

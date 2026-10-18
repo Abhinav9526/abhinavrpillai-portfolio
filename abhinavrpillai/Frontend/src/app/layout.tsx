@@ -8,6 +8,8 @@ import SiteFrame from "@/components/site-frame";
 import { Providers } from "@/components/providers";
 import { GoogleAnalytics } from "@next/third-parties/google";
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
 /* Body/base font — Space Grotesk, bound to --font-sans (applied as `font-sans`
  * on <html>). Everything that isn't a heading inherits this. */
 const spaceGroteskSans = Space_Grotesk({
@@ -30,7 +32,11 @@ export const viewport = {
 };
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: config.title,
+  alternates: {
+    canonical: "/",
+  },
   description: config.description.long,
   keywords: config.keywords,
   authors: [{ name: config.author }],
@@ -97,6 +103,85 @@ export default function RootLayout({
         ></Script>
       </head>
       <body suppressHydrationWarning>
+        <Script
+          id="person-schema"
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Person",
+              name: config.author,
+              jobTitle: "Full Stack Software Developer",
+              description: config.description.long,
+              url: siteUrl,
+              image: `${siteUrl}/assets/seo/og-image.png`,
+              sameAs: [
+                config.social.github,
+                config.social.linkedin,
+                config.social.instagram,
+              ],
+              address: {
+                "@type": "PostalAddress",
+                addressRegion: "Kerala",
+                addressCountry: "IN",
+              },
+            }),
+          }}
+        />
+        <Script
+          id="website-schema"
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              name: config.title,
+              url: siteUrl,
+              description: config.description.short,
+              potentialAction: {
+                "@type": "SearchAction",
+                target: `${siteUrl}/?q={search_term_string}`,
+                "query-input": "required name=search_term_string",
+              },
+            }),
+          }}
+        />
+        <Script
+          id="faq-schema"
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "FAQPage",
+              mainEntity: [
+                {
+                  "@type": "Question",
+                  name: "Who is Abhinav R Pillai?",
+                  acceptedAnswer: {
+                    "@type": "Answer",
+                    text: "Abhinav R Pillai is a full stack software developer in Kerala who builds modern web applications, AI-powered experiences, and responsive interfaces.",
+                  },
+                },
+                {
+                  "@type": "Question",
+                  name: "What technologies does Abhinav R Pillai use?",
+                  acceptedAnswer: {
+                    "@type": "Answer",
+                    text: "He works with React.js, Next.js, Node.js, MongoDB, ASP.NET, TypeScript, Tailwind CSS, and AI integrations.",
+                  },
+                },
+                {
+                  "@type": "Question",
+                  name: "Is Abhinav R Pillai available for freelance or full-time work in Kerala?",
+                  acceptedAnswer: {
+                    "@type": "Answer",
+                    text: "Yes. The portfolio highlights his availability for freelance, contract, and full-time software development opportunities.",
+                  },
+                },
+              ],
+            }),
+          }}
+        />
         <Providers>
           <SiteFrame>{children}</SiteFrame>
         </Providers>

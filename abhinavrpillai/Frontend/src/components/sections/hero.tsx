@@ -81,7 +81,7 @@ const HeroSection = () => {
                       "cursor-default bg-clip-text"
                     )}
                   >
-                    A Full Stack Web Developer
+                    Full Stack Software Developer in Kerala
                   </p>
                 </BlurIn>
               </div>

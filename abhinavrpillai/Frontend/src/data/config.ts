@@ -1,14 +1,22 @@
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
 const config = {
-  title: "Abhinav R Pillai | Full Stack Developer",
+  title: "Abhinav R Pillai | Full Stack Software Developer in Kerala",
   description: {
-    long: "Full Stack Developer with 1+ year of hands-on experience building scalable web applications using React.js, Node.js, and MongoDB. Proficient in developing end-to-end solutions, including responsive front-end interfaces and robust backend APIs.",
+    long: "Abhinav R Pillai is a full stack software developer in Kerala with hands-on experience building scalable web applications using React.js, Node.js, MongoDB, and AI-powered features. He creates fast, responsive, SEO-friendly digital products for startups and businesses.",
     short:
-      "Discover the portfolio of Abhinav R Pillai, a Full Stack Developer specializing in React.js, Node.js, MongoDB, and ASP.NET.",
+      "Discover the portfolio of Abhinav R Pillai, a full stack software developer in Kerala specializing in React.js, Node.js, MongoDB, ASP.NET, and AI-driven web experiences.",
   },
   keywords: [
     "Abhinav R Pillai",
     "Abhinav R",
     "Pillai",
+    "Kerala software developer",
+    "software developer in Kerala",
+    "best software developer in Kerala",
+    "full stack developer Kerala",
+    "React developer Kerala",
+    "web developer Kerala",
     "portfolio",
     "full stack developer",
     "software engineer",
@@ -26,7 +34,7 @@ const config = {
   ],
   author: "Abhinav R Pillai",
   email: "rpillaiabhinav@gmail.com",
-  site: "https://linkedin.com/in/abhinav-r-pillai-6b7b1a248",
+  site: siteUrl,
 
   // for github stars button (keep repo name, update user)
   githubUsername: "abhinavrpillai",

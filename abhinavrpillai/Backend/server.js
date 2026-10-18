@@ -214,8 +214,8 @@ wss.on('connection', (ws, req) => {
       if (response.setupComplete) {
         console.log('Gemini Live API setup complete! Triggering initial greeting...');
         const greetingText = config.profile === 'resume'
-          ? "Hello, please start the call by saying: 'Hello! This is John's Resume AI assistant. How can I help you today?' in a warm, professional voice."
-          : "Hello, please start the call by saying: 'Hello, thank you for calling ByteStore Customer Support. How can I help you today?' in a helpful and polite voice.";
+          ? "Hello, please start the call by saying: 'Hello! I am Abhinav R Pillai. How can I help you today?' in a warm, friendly Indian English voice."
+          : "Hello, please start the call by saying: 'Hello, thank you for calling. How can I help you today?' in a helpful and polite voice.";
         
         const greetingMessage = {
           clientContent: {
