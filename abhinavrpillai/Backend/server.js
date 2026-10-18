@@ -140,6 +140,7 @@ wss.on('connection', (ws, req) => {
   const geminiWs = new WebSocket(geminiUrl);
 
   let twilioStreamSid = null;
+  let lastGeminiAudioChunkAt = 0;
 
 
   // Handle connection to Gemini Live API
@@ -238,6 +239,18 @@ wss.on('connection', (ws, req) => {
             const rawPcm24kBase64 = part.inlineData.data;
             const rawPcm24kBuffer = Buffer.from(rawPcm24kBase64, 'base64');
 
+            // Enable with AUDIO_DEBUG=true on Render to identify whether gaps
+            // occur before audio reaches this server or after it is forwarded.
+            if (process.env.AUDIO_DEBUG === 'true') {
+              const now = Date.now();
+              const gapMs = lastGeminiAudioChunkAt ? now - lastGeminiAudioChunkAt : 0;
+              console.log(
+                `[audio-debug] Gemini chunk: ${rawPcm24kBuffer.length} bytes; ` +
+                `${gapMs ? `${gapMs}ms since previous chunk` : 'first chunk'}`
+              );
+              lastGeminiAudioChunkAt = now;
+            }
+
             if (urlPath === '/media-stream') {
               // Twilio: Transcode 24kHz PCM -> 8kHz mu-law
               const twilioPayload = geminiToTwilio(rawPcm24kBuffer);
@@ -254,7 +267,11 @@ wss.on('connection', (ws, req) => {
             } else if (urlPath === '/web-stream') {
               // Web Simulator: Forward raw 24kHz PCM bytes directly
               if (ws.readyState === WebSocket.OPEN) {
-                ws.send(rawPcm24kBuffer);
+                ws.send(rawPcm24kBuffer, (err) => {
+                  if (err) {
+                    console.error('[audio-debug] Failed to forward audio chunk:', err.message);
+                  }
+                });
               }
             }
           }

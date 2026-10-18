@@ -254,7 +254,7 @@ const OnlineUsers = () => {
 
         <PopoverContent
           className={cn(
-            "w-80 min-h-[400px] sm:w-96 p-0 border-none shadow-2xl overflow-hidden rounded-xl mr-4 mb-4 flex flex-col",
+            "w-[calc(100vw-2rem)] max-w-sm sm:w-96 min-h-[400px] p-0 border-none shadow-2xl overflow-hidden rounded-xl mr-2 sm:mr-4 mb-4 flex flex-col",
             THEME.bg.primary,
             THEME.text.primary
           )}

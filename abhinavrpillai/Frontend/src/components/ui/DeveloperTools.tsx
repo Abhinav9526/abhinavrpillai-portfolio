@@ -87,20 +87,20 @@ export default function DeveloperTools() {
     metrics.fps > 50 ? "text-emerald-400" : metrics.fps > 30 ? "text-yellow-400" : "text-red-400";
 
   return (
-    <div className="fixed bottom-24 left-6 z-[9998]" suppressHydrationWarning>
+    <div className="fixed bottom-16 sm:bottom-24 left-4 sm:left-6 z-[9991]" suppressHydrationWarning>
       {/* Main Dev Tools Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-cyan-400 transition-all duration-300 border border-cyan-500/50 hover:border-cyan-400 shadow-lg hover:shadow-cyan-500/25"
+        className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-cyan-400 transition-all duration-300 border border-cyan-500/50 hover:border-cyan-400 shadow-lg hover:shadow-cyan-500/25"
         aria-label="Developer Tools"
         title="Developer Tools"
       >
-        <Code2 className="w-5 h-5" />
+        <Code2 className="w-4 h-4 sm:w-5 sm:h-5" />
       </button>
 
       {/* Expandable Panel */}
       {isOpen && (
-        <div className="absolute bottom-16 left-0 w-64 bg-slate-950/95 backdrop-blur-lg border border-cyan-500/40 rounded-xl shadow-2xl p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="absolute bottom-14 sm:bottom-16 left-0 w-[calc(100vw-2rem)] max-w-xs sm:w-64 bg-slate-950/95 backdrop-blur-lg border border-cyan-500/40 rounded-xl shadow-2xl p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
           {/* Header */}
           <div className="flex items-center justify-between pb-2 border-b border-cyan-500/20">
             <h3 className="text-sm font-bold text-cyan-400 flex items-center gap-2">

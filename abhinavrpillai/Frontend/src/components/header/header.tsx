@@ -49,52 +49,56 @@ const Header = ({ loader }: HeaderProps) => {
         }}
       >
       </div> */}
-      <div className={cn(styles.bar, "flex items-center justify-between")}>
-        <Button variant={"link"} className="text-md p-0 h-auto hover:no-underline" asChild>
+      <div className={cn(styles.bar, "flex items-center justify-between w-full max-w-7xl mx-auto")}>
+        <Button variant={"link"} className="p-0 h-auto hover:no-underline shrink-0 max-w-[65%] sm:max-w-none" asChild>
           <Link href="/" className="flex items-center gap-2" aria-label={config.author}>
             <img
               src="/assets/logo-header.png"
               alt={config.author}
-              className="h-7 md:h-8 w-auto object-contain rounded"
+              className="h-6 sm:h-7 md:h-8 w-auto max-w-full object-contain rounded"
             />
           </Link>
         </Button>
 
-        <FunnyThemeToggle className="w-6 h-6 mr-4 hidden md:flex" />
-        {isHome && process.env.NEXT_PUBLIC_WS_URL && <OnlineUsers />}
-        {config.githubUsername && config.githubRepo && (
-          <GitHubStarsButton
-            username={config.githubUsername}
-            repo={config.githubRepo}
-            className="mr-4"
-          />
-        )}
-        <Button
-          variant={"ghost"}
-          onClick={() => setIsActive(!isActive)}
-          aria-label={isActive ? "Close menu" : "Open menu"}
-          aria-expanded={isActive}
-          className={cn(
-            styles.el,
-            "m-0 p-0 h-6 bg-transparent flex items-center justify-center"
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <FunnyThemeToggle className="w-5 h-5 sm:w-6 sm:h-6 hidden md:flex" />
+          {isHome && process.env.NEXT_PUBLIC_WS_URL && <OnlineUsers />}
+          {config.githubUsername && config.githubRepo && (
+            <div className="hidden sm:block">
+              <GitHubStarsButton
+                username={config.githubUsername}
+                repo={config.githubRepo}
+                className="mr-2"
+              />
+            </div>
           )}
-        >
-          <div className="relative hidden md:flex items-center">
-            <motion.p
-              variants={opacity}
-              animate={!isActive ? "open" : "closed"}
-            >
-              Menu
-            </motion.p>
-            <motion.p variants={opacity} animate={isActive ? "open" : "closed"}>
-              Close
-            </motion.p>
-          </div>
-          <div
-            className={`${styles.burger} ${isActive ? styles.burgerActive : ""
-              }`}
-          ></div>
-        </Button>
+          <Button
+            variant={"ghost"}
+            onClick={() => setIsActive(!isActive)}
+            aria-label={isActive ? "Close menu" : "Open menu"}
+            aria-expanded={isActive}
+            className={cn(
+              styles.el,
+              "m-0 p-1 sm:p-2 h-8 sm:h-9 bg-transparent flex items-center justify-center"
+            )}
+          >
+            <div className="relative hidden md:flex items-center">
+              <motion.p
+                variants={opacity}
+                animate={!isActive ? "open" : "closed"}
+              >
+                Menu
+              </motion.p>
+              <motion.p variants={opacity} animate={isActive ? "open" : "closed"}>
+                Close
+              </motion.p>
+            </div>
+            <div
+              className={`${styles.burger} ${isActive ? styles.burgerActive : ""
+                }`}
+            ></div>
+          </Button>
+        </div>
       </div>
       <motion.div
         variants={background}

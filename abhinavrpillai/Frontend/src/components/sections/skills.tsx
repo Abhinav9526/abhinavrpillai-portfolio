@@ -21,15 +21,15 @@ const SkillsSection = () => {
   return (
     <SectionWrapper
       id="skills"
-      className="flex w-full min-h-screen flex-col justify-center py-24"
+      className="flex w-full min-h-screen flex-col justify-center py-16 sm:py-24 px-3 sm:px-6"
     >
       <SectionHeader
         id="skills"
         title="Tech Stack"
         desc="Tools I build with"
-        className="static mb-14"
+        className="static mb-8 sm:mb-14"
       />
-      <ul className="mx-auto grid w-full max-w-5xl grid-cols-2 gap-3 px-4 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
+      <ul className="mx-auto grid w-full max-w-5xl grid-cols-2 gap-2.5 sm:gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {Object.values(SKILLS)
           .filter((skill) => !["Copilot", "GitHub Copilot"].includes(skill.label))
           .map((skill) => (

@@ -86,7 +86,7 @@ export default function AudioPlayer() {
   };
 
   return (
-    <div className="fixed bottom-6 left-6 z-[9999] flex items-center gap-3 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 px-4 py-2.5 rounded-full shadow-xl pointer-events-auto">
+    <div className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-[9990] flex items-center gap-2 sm:gap-3 bg-slate-950/85 backdrop-blur-md border border-slate-800/80 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full shadow-xl pointer-events-auto scale-90 sm:scale-100 origin-bottom-left">
       {/* Animated Sound Wave Visualizer */}
       <div className="flex items-end gap-0.5 h-3.5 w-6 justify-center pb-0.5">
         {[1, 2, 3, 4, 5].map((bar) => (

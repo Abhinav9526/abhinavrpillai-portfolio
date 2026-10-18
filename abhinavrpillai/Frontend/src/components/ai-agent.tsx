@@ -601,7 +601,7 @@ export default function AIAgent() {
       {isOpen && (
         <div
           ref={chatContainerRef}
-          className="fixed bottom-24 right-6 z-[9996] w-80 sm:w-[340px] h-[520px] bg-gradient-to-br from-slate-950/95 via-slate-900/95 to-slate-950/95 border border-blue-500/30 rounded-[40px] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur-xl"
+          className="fixed inset-x-2 bottom-4 sm:inset-x-auto sm:bottom-24 sm:right-6 z-[9996] sm:w-[340px] h-[85vh] max-h-[560px] sm:h-[520px] bg-gradient-to-br from-slate-950/95 via-slate-900/95 to-slate-950/95 border border-blue-500/30 rounded-3xl sm:rounded-[40px] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur-xl"
           suppressHydrationWarning
         >
           {/* Smartphone notch and status bar */}

@@ -32,8 +32,7 @@
     a {
       text-decoration: none;
       color: hsl(var(--foreground));
-      position: absolute;
-      left: 0;
+      position: static;
     }
 
     .shopContainer {

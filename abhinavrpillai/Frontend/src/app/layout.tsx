@@ -23,6 +23,12 @@ const unbounded = Unbounded({
   display: "swap",
 });
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
+
 export const metadata: Metadata = {
   title: config.title,
   description: config.description.long,

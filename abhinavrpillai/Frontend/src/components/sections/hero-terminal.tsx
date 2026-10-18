@@ -108,7 +108,7 @@ export default function HeroTerminal() {
         </div>
 
         {/* Terminal Body */}
-        <div className="bg-slate-950/90 p-4 h-60 overflow-y-auto font-mono text-xs sm:text-sm text-slate-300 relative">
+        <div className="bg-slate-950/90 p-3 sm:p-4 h-48 sm:h-60 overflow-y-auto font-mono text-xs sm:text-sm text-slate-300 relative">
           <AnimatePresence>
             {isMatrixActive ? (
               <MatrixRain key="matrix" />
@@ -137,33 +137,33 @@ export default function HeroTerminal() {
         {/* Input Bar */}
         <form
           onSubmit={handleSubmit}
-          className="flex items-center bg-slate-950/95 border-t border-slate-900 px-4 py-2.5 rounded-b-xl"
+          className="flex items-center bg-slate-950/95 border-t border-slate-900 px-3 sm:px-4 py-2 sm:py-2.5 rounded-b-xl gap-1"
         >
-          <span className="text-primary font-bold font-mono mr-2 select-none">
-            developer@abhinav:~$
+          <span className="text-primary font-bold font-mono text-xs sm:text-sm select-none shrink-0">
+            dev:~$
           </span>
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isMatrixActive}
-            className="flex-1 bg-transparent border-0 outline-none focus:ring-0 text-white font-mono text-sm p-0"
+            className="flex-1 min-w-0 bg-transparent border-0 outline-none focus:ring-0 text-white font-mono text-xs sm:text-sm p-0"
             placeholder={isMatrixActive ? "Locked..." : "Type command..."}
           />
-          <button type="submit" className="text-muted-foreground hover:text-white transition-colors">
-            <CornerDownLeft className="h-4 w-4" />
+          <button type="submit" className="text-muted-foreground hover:text-white transition-colors p-1 shrink-0">
+            <CornerDownLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           </button>
         </form>
       </CardWindow>
 
       {/* Suggested Command Chips */}
-      <div className="flex flex-wrap gap-2 justify-center mt-3 select-none">
+      <div className="flex flex-wrap gap-1.5 sm:gap-2 justify-center mt-2.5 sm:mt-3 select-none px-1">
         {COMMANDS.map((cmd) => (
           <button
             key={cmd}
             onClick={() => handleCommand(cmd)}
             disabled={isMatrixActive}
-            className="px-2.5 py-1 text-[10px] sm:text-xs font-mono font-normal rounded-full border border-border/80 bg-secondary/80 dark:bg-slate-900/60 hover:bg-primary/10 hover:border-primary/40 text-muted-foreground hover:text-primary transition-all duration-300"
+            className="px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-xs font-mono font-normal rounded-full border border-border/80 bg-secondary/80 dark:bg-slate-900/60 hover:bg-primary/10 hover:border-primary/40 text-muted-foreground hover:text-primary transition-all duration-300"
           >
             {cmd}
           </button>

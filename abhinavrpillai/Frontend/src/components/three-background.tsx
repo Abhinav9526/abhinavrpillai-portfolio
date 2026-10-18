@@ -20,19 +20,21 @@ export default function ThreeBackground() {
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(bgColor, isDayTime ? 0.014 : 0.012); // Fog for depth
 
+    const isMobile = window.innerWidth < 768;
+
     // Camera
     const camera = new THREE.PerspectiveCamera(
-      60,
+      isMobile ? 70 : 60,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
     );
-    camera.position.set(0, 0, 24);
+    camera.position.set(0, 0, isMobile ? 28 : 24);
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: !isMobile, alpha: true, powerPreference: "high-performance" });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
     container.appendChild(renderer.domElement);
 
     // --- Add Lighting ---
@@ -148,6 +150,9 @@ export default function ThreeBackground() {
     window.addEventListener("scroll", handleScroll, { passive: true });
 
     const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      camera.fov = mobile ? 70 : 60;
+      camera.position.z = mobile ? 28 : 24;
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
