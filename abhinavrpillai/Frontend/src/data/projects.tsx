@@ -5,7 +5,7 @@ import { TypographyH3, TypographyP } from "@/components/ui/typography";
 import { ArrowUpRight, ExternalLink, Link2, MoveUpRight } from "lucide-react";
 import Link from "next/link";
 import { ReactNode } from "react";
-import { SiCsharp, SiDotnet, SiMicrosoftsqlserver, SiHtml5, SiCss3, SiBootstrap } from "react-icons/si";
+import { SiDotnet, SiMicrosoft, SiHtml5, SiCss3, SiBootstrap } from "react-icons/si";
 
 const BASE_PATH = "/assets/projects-screenshots";
 
@@ -107,7 +107,7 @@ const PROJECT_SKILLS = {
     title: "C#",
     bg: "black",
     fg: "white",
-    icon: <SiCsharp className="text-sm" />,
+    icon: <SiDotnet className="text-sm" />,
   },
   aspnet: {
     title: "ASP.NET",
@@ -119,7 +119,7 @@ const PROJECT_SKILLS = {
     title: "MS SQL Server",
     bg: "black",
     fg: "white",
-    icon: <SiMicrosoftsqlserver className="text-sm" />,
+    icon: <SiMicrosoft className="text-sm" />,
   },
 };
 
