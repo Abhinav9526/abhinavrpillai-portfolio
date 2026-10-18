@@ -32,8 +32,9 @@ function float32ToPcm16(float32Array: Float32Array): ArrayBuffer {
   const buffer = new ArrayBuffer(float32Array.length * 2);
   const view = new DataView(buffer);
   for (let i = 0; i < float32Array.length; i++) {
-    // Apply a 4.0x digital pre-gain to boost quiet microphone signals for faster VAD trigger
-    let s = Math.max(-1, Math.min(1, float32Array[i] * 4.0));
+    // Preserve the microphone level. Artificial amplification also amplifies
+    // speaker echo, which can cause the live model to interrupt itself.
+    const s = Math.max(-1, Math.min(1, float32Array[i]));
     view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); // true for little endian
   }
   return buffer;
@@ -205,7 +206,8 @@ export default function AIAgent() {
       source.buffer = audioBuffer;
 
       const gainNode = audioCtx.createGain();
-      gainNode.gain.value = 1.2;
+      // Values above 1 can clip PCM peaks and make hosted audio sound distorted.
+      gainNode.gain.value = 1;
       source.connect(gainNode);
       gainNode.connect(audioCtx.destination);
 
@@ -213,7 +215,7 @@ export default function AIAgent() {
       if (nextPlayTimeRef.current < curTime) {
         // Remote WebSocket audio arrives with normal internet jitter. Starting
         // with a small buffer prevents gaps that are not noticeable locally.
-        nextPlayTimeRef.current = curTime + 0.15;
+        nextPlayTimeRef.current = curTime + 0.25;
       }
 
       source.start(nextPlayTimeRef.current);
@@ -299,7 +301,13 @@ export default function AIAgent() {
 
             const scriptNode = audioCtx.createScriptProcessor(8192, 1, 1);
             mediaSource.connect(scriptNode);
-            scriptNode.connect(audioCtx.destination);
+            // ScriptProcessor nodes need an output connection to keep receiving
+            // audio callbacks. Route it through a muted gain instead of sending
+            // the microphone back through the speakers (which creates feedback).
+            const mutedMonitor = audioCtx.createGain();
+            mutedMonitor.gain.value = 0;
+            scriptNode.connect(mutedMonitor);
+            mutedMonitor.connect(audioCtx.destination);
             scriptProcessorRef.current = scriptNode;
 
             let chunkCount = 0;
