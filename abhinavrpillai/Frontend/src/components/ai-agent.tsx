@@ -197,8 +197,6 @@ export default function AIAgent() {
         safeSamples[i] = Number.isFinite(sample) ? Math.max(-1, Math.min(1, sample)) : 0;
       }
 
-      console.log(`Queueing audio chunk: samples=${safeSamples.length}, contextTime=${audioCtx.currentTime.toFixed(3)}, nextPlayTime=${nextPlayTimeRef.current.toFixed(3)}`);
-
       // Gemini Live API returns audio at 24000Hz PCM.
       const audioBuffer = audioCtx.createBuffer(1, safeSamples.length, 24000);
       audioBuffer.getChannelData(0).set(safeSamples);
@@ -213,7 +211,9 @@ export default function AIAgent() {
 
       const curTime = audioCtx.currentTime;
       if (nextPlayTimeRef.current < curTime) {
-        nextPlayTimeRef.current = curTime + 0.01;
+        // Remote WebSocket audio arrives with normal internet jitter. Starting
+        // with a small buffer prevents gaps that are not noticeable locally.
+        nextPlayTimeRef.current = curTime + 0.15;
       }
 
       source.start(nextPlayTimeRef.current);
@@ -272,21 +272,14 @@ export default function AIAgent() {
 
     // Attempt to establish WebSocket connection only when call connects
     if (typeof window !== "undefined") {
-      let wsUrl = "";
-      const host = window.location.host;
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      
-      if (host.includes("devtunnels.ms")) {
-        // Map VS Code Dev Tunnels subdomain correctly, e.g. tx1c03l7-3000.inc1.devtunnels.ms -> tx1c03l7-3005.inc1.devtunnels.ms
-        const cleanHost = host.split(":")[0];
-        const tunnelHost = cleanHost.replace("-3000", "-3005");
-        wsUrl = `wss://${tunnelHost}/web-stream`;
-      } else if (window.location.hostname.includes("tx1c03l7")) {
-        // Specific fallback for user's VS Code Dev Tunnel subdomain
-        wsUrl = "wss://tx1c03l7-3005.inc1.devtunnels.ms/web-stream";
-      } else {
-        wsUrl = `${proto}//${window.location.hostname}:3005/web-stream`;
-      }
+      const configuredWsUrl = process.env.NEXT_PUBLIC_AI_WS_URL?.trim();
+      const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = configuredWsUrl || (
+        isLocal
+          ? `ws://${window.location.hostname}:3005/web-stream`
+          : `${protocol}//${window.location.host}/web-stream`
+      );
 
       console.log("Attempting to connect to Gemini Live proxy server:", wsUrl);
 
