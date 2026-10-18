@@ -85,6 +85,8 @@ export default function AIAgent() {
   const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const nextPlayTimeRef = useRef<number>(0);
+  const isAiSpeakingRef = useRef<boolean>(false);
+  const speakingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const callStateRef = useRef(callState);
   const isMutedRef = useRef(isMuted);
@@ -222,6 +224,18 @@ export default function AIAgent() {
       source.start(nextPlayTimeRef.current);
       nextPlayTimeRef.current += audioBuffer.duration;
 
+      isAiSpeakingRef.current = true;
+      setMicStatus("speaking");
+      if (speakingTimerRef.current) {
+        clearTimeout(speakingTimerRef.current);
+      }
+      // Hold speaking status until the buffered audio actually completes
+      const remainingSec = Math.max(0.1, nextPlayTimeRef.current - curTime);
+      speakingTimerRef.current = setTimeout(() => {
+        isAiSpeakingRef.current = false;
+        setMicStatus("idle");
+      }, remainingSec * 1000 + 150);
+
       activeSourcesRef.current.push(source);
       source.onended = () => {
         activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
@@ -233,6 +247,13 @@ export default function AIAgent() {
 
   // Interruption logic: stop all queue sources immediately
   const clearAudioQueue = () => {
+    if (speakingTimerRef.current) {
+      clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
+    isAiSpeakingRef.current = false;
+    setMicStatus("idle");
+
     activeSourcesRef.current.forEach((source) => {
       try {
         source.stop();
@@ -322,9 +343,14 @@ export default function AIAgent() {
                 }
                 const rms = Math.sqrt(sum / inputData.length);
                 if (rms > 0.015) {
-                  setMicStatus("listening");
+                  // Only show listening if AI is not already speaking
+                  if (!isAiSpeakingRef.current) {
+                    setMicStatus("listening");
+                  }
                 } else {
-                  setMicStatus("idle");
+                  if (!isAiSpeakingRef.current) {
+                    setMicStatus("idle");
+                  }
                 }
 
                 // Throttle log to avoid console spamming, prints roughly every 8 seconds

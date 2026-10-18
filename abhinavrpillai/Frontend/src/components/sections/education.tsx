@@ -32,7 +32,7 @@ const EDUCATION = [
 const EducationSection = () => {
   return (
     <SectionWrapper
-      className="flex flex-col items-center justify-center min-h-[90vh] py-20 relative overflow-hidden"
+      className="flex flex-col items-center justify-center py-16 sm:py-24 relative overflow-hidden"
     >
       <div className="w-full max-w-3xl px-4 mx-auto relative">
         <div className="flex flex-row items-center justify-between md:justify-start gap-4 mb-10 select-none">

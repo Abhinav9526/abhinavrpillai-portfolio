@@ -15,7 +15,7 @@ import LottiePlayer from "../lottie-player";
 
 const ContactSection = () => {
   return (
-    <SectionWrapper id="contact" className="min-h-screen max-w-7xl mx-auto px-4 py-16 md:py-24">
+    <SectionWrapper id="contact" className="max-w-7xl mx-auto px-4 py-16 sm:py-24">
       <SectionHeader id='contact' className="relative mb-6 sm:mb-14" title={
         <>
           LET&apos;S WORK <br />

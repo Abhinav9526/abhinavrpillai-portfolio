@@ -20,14 +20,14 @@ import LottiePlayer from "../lottie-player";
 
 const ProjectsSection = () => {
   return (
-    <SectionWrapper id="projects" className="max-w-7xl mx-auto md:min-h-[130vh] px-4">
+    <SectionWrapper id="projects" className="max-w-7xl mx-auto py-16 sm:py-24 px-4">
       <div className="flex flex-row items-center justify-between md:justify-start gap-4 mb-8 select-none">
         <SectionHeader id="projects" title="Projects" className="m-0" />
         <div className="w-16 h-16 md:w-20 md:h-20 -mt-3 shrink-0">
           <LottiePlayer src="https://lottie.host/82dfc7ea-257a-40a1-9457-4581297e88de/tB7P4o7v1O.json" />
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {projects.map((project) => (
           <ProjectCard key={project.id} project={project} />
         ))}

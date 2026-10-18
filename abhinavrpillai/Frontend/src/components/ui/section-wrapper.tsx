@@ -1,7 +1,4 @@
-"use client";
-
-import { useRef } from "react";
-import { motion, useScroll, useTransform } from "motion/react";
+import React from "react";
 import { cn } from "@/lib/utils";
 
 interface SectionWrapperProps extends React.HTMLAttributes<HTMLElement> {
@@ -9,28 +6,15 @@ interface SectionWrapperProps extends React.HTMLAttributes<HTMLElement> {
 }
 
 const SectionWrapper = ({ id, className, children, ...props }: SectionWrapperProps) => {
-  const containerRef = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: containerRef,
-    offset: ["start end", "end start"],
-  });
-
-  const opacity = useTransform(scrollYProgress, [0, 0.2, 0.8, 1], [0, 1, 1, 0]);
-  const scale = useTransform(scrollYProgress, [0, 0.2, 0.8, 1], [0.8, 1, 1, 0.8]);
-
   return (
     <section
       id={id}
-      ref={containerRef}
-      className={cn("relative", className)}
+      className={cn("relative w-full", className)}
       {...props}
     >
-      <motion.div
-        style={{ opacity, scale }}
-        className="w-full h-full"
-      >
+      <div className="w-full h-full">
         {children}
-      </motion.div>
+      </div>
     </section>
   );
 };

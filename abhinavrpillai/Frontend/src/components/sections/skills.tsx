@@ -21,7 +21,7 @@ const SkillsSection = () => {
   return (
     <SectionWrapper
       id="skills"
-      className="flex w-full min-h-screen flex-col justify-center py-16 sm:py-24 px-3 sm:px-6"
+      className="flex w-full flex-col justify-center py-16 sm:py-24 px-3 sm:px-6"
     >
       <SectionHeader
         id="skills"

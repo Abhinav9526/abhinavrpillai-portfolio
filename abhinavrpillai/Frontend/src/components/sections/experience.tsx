@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 const ExperienceSection = () => {
   return (
     <SectionWrapper
-      className="flex flex-col items-center justify-center min-h-[120vh] py-20 relative overflow-hidden"
+      className="flex flex-col items-center justify-center py-16 sm:py-24 relative overflow-hidden"
     >
       <div className="w-full max-w-3xl px-4 mx-auto relative">
         <SectionHeader
