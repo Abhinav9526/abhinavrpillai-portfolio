@@ -63,6 +63,7 @@ export default function AIAgent() {
   const isMutedRef = useRef<boolean>(isMuted);
   const isSpeakerOnRef = useRef<boolean>(isSpeakerOn);
   const callStateRef = useRef(callState);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
@@ -197,53 +198,85 @@ export default function AIAgent() {
     }
   };
 
-  // Speaks AI response cleanly with zero stutter and zero acoustic echo
+  // Speaks AI response cleanly with natural human voice (zero stutter and zero acoustic echo)
   const speakAiResponse = (text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (typeof window === "undefined") return;
     if (!isSpeakerOnRef.current) return;
 
-    // Stop any speech recognition while AI talks to prevent hearing itself!
+    // Pause recognition while speaking so mic never hears speaker voice
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch (e) {}
     }
 
-    // Cancel any previous utterance
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    if (selectedVoiceRef.current) {
-      utterance.voice = selectedVoiceRef.current;
+    // Cancel any ongoing audio or speech
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      currentAudioRef.current = null;
     }
-    utterance.rate = 1.05; // Natural modern conversation pace
-    utterance.pitch = 1.0;
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
 
-    utterance.onstart = () => {
-      isAiSpeakingRef.current = true;
-      setMicStatus("speaking");
-    };
+    try {
+      const ttsUrl = `/api/tts?text=${encodeURIComponent(text)}&lang=en-IN`;
+      const audio = new Audio(ttsUrl);
+      currentAudioRef.current = audio;
 
-    utterance.onend = () => {
-      isAiSpeakingRef.current = false;
-      if (callStateRef.current === "connected" && !isMutedRef.current) {
-        setMicStatus("listening");
-        // Resume listening automatically for next user question
-        startListening();
-      } else {
-        setMicStatus("idle");
-      }
-    };
+      audio.onplay = () => {
+        isAiSpeakingRef.current = true;
+        setMicStatus("speaking");
+      };
 
-    utterance.onerror = () => {
-      isAiSpeakingRef.current = false;
-      if (callStateRef.current === "connected") {
-        setMicStatus("listening");
-        startListening();
-      }
-    };
+      audio.onended = () => {
+        isAiSpeakingRef.current = false;
+        currentAudioRef.current = null;
+        if (callStateRef.current === "connected" && !isMutedRef.current) {
+          setMicStatus("listening");
+          startListening();
+        } else {
+          setMicStatus("idle");
+        }
+      };
 
-    window.speechSynthesis.speak(utterance);
+      audio.onerror = () => {
+        console.warn("Audio TTS failed, using high-definition browser speech fallback");
+        if ("speechSynthesis" in window) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          if (selectedVoiceRef.current) {
+            utterance.voice = selectedVoiceRef.current;
+          }
+          utterance.rate = 1.05;
+          utterance.onstart = () => {
+            isAiSpeakingRef.current = true;
+            setMicStatus("speaking");
+          };
+          utterance.onend = () => {
+            isAiSpeakingRef.current = false;
+            if (callStateRef.current === "connected" && !isMutedRef.current) {
+              setMicStatus("listening");
+              startListening();
+            }
+          };
+          window.speechSynthesis.speak(utterance);
+        }
+      };
+
+      audio.play().catch((err) => {
+        console.warn("Audio play blocked, using speech fallback:", err);
+        isAiSpeakingRef.current = false;
+        if (callStateRef.current === "connected") {
+          setMicStatus("listening");
+          startListening();
+        }
+      });
+    } catch (err) {
+      console.warn("Error starting TTS audio:", err);
+    }
   };
 
   // Start continuous Native Speech Recognition
@@ -329,6 +362,13 @@ export default function AIAgent() {
     if (!queryText.trim()) return;
 
     // Stop speaking immediately if user interrupts
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      currentAudioRef.current = null;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -456,6 +496,13 @@ export default function AIAgent() {
     }
     stopRingingSound();
 
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      currentAudioRef.current = null;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -822,8 +869,13 @@ export default function AIAgent() {
                   onClick={() => {
                     const next = !isSpeakerOn;
                     setIsSpeakerOn(next);
-                    if (!next && typeof window !== "undefined" && "speechSynthesis" in window) {
-                      window.speechSynthesis.cancel();
+                    if (!next) {
+                      if (currentAudioRef.current) {
+                        currentAudioRef.current.pause();
+                      }
+                      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+                        window.speechSynthesis.cancel();
+                      }
                       isAiSpeakingRef.current = false;
                     }
                   }}
