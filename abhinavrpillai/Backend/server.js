@@ -113,6 +113,10 @@ wss.on('connection', (ws, req) => {
   const urlPath = req.url;
   console.log(`New WebSocket connection established for route: ${urlPath}`);
 
+  if (ws._socket) {
+    ws._socket.setNoDelay(true);
+  }
+
   if (urlPath !== '/media-stream' && urlPath !== '/web-stream') {
     ws.close(4000, 'Invalid stream route');
     return;
@@ -142,7 +146,6 @@ wss.on('connection', (ws, req) => {
   let twilioStreamSid = null;
   let lastGeminiAudioChunkAt = 0;
 
-
   // Handle connection to Gemini Live API
   geminiWs.on('open', () => {
     console.log('Connected to Google Gemini Live API');
@@ -158,7 +161,7 @@ wss.on('connection', (ws, req) => {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
-            silenceDurationMs: 750 // 750ms prevents AI speech from stuttering or breaking on natural speech pauses
+            silenceDurationMs: 250 // 250ms for instantaneous human response without lag
           }
         },
         generationConfig: {
