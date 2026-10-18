@@ -1,12 +1,8 @@
-import { EmailTemplate } from "@/components/email-template";
-import { config } from "@/data/config";
-import { Resend } from "resend";
+import { sendContactEmails } from "@/lib/email";
 import { z } from "zod";
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-
 const rateLimit = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_MAX = 3;
+const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 function isRateLimited(ip: string): boolean {
@@ -20,48 +16,44 @@ function isRateLimited(ip: string): boolean {
   return entry.count > RATE_LIMIT_MAX;
 }
 
-const Email = z.object({
-  fullName: z.string().min(2, "Full name is invalid!"),
-  email: z.string().email({ message: "Email is invalid!" }),
-  message: z.string().min(10, "Message is too short!"),
+const EmailSchema = z.object({
+  fullName: z.string().min(2, "Full name must be at least 2 characters."),
+  email: z.string().email("Please enter a valid email address."),
+  message: z.string().min(5, "Message must be at least 5 characters."),
 });
+
 export async function POST(req: Request) {
   try {
-    if (!resend) {
-      return Response.json({ error: "Email service is not configured." }, { status: 503 });
-    }
-
     const ip = req.headers.get("x-forwarded-for") ?? "unknown";
     if (isRateLimited(ip)) {
-      return Response.json({ error: "Too many requests. Please try again later." }, { status: 429 });
+      return Response.json(
+        { error: "Too many requests. Please wait a minute before trying again." },
+        { status: 429 }
+      );
     }
 
     const body = await req.json();
-    const {
-      success: zodSuccess,
-      data: zodData,
-      error: zodError,
-    } = Email.safeParse(body);
-    if (!zodSuccess)
-      return Response.json({ error: zodError?.message }, { status: 400 });
+    const parseResult = EmailSchema.safeParse(body);
 
-    const { data: resendData, error: resendError } = await resend.emails.send({
-      from: "Porfolio <onboarding@resend.dev>",
-      to: [config.email],
-      subject: "Contact me from portfolio",
-      react: EmailTemplate({
-        fullName: zodData.fullName,
-        email: zodData.email,
-        message: zodData.message,
-      }) as React.ReactElement,
-    });
-
-    if (resendError) {
-      return Response.json({ error: "Failed to send email" }, { status: 500 });
+    if (!parseResult.success) {
+      const errorMsg = parseResult.error.issues.map((i) => i.message).join(", ");
+      return Response.json({ error: errorMsg }, { status: 400 });
     }
 
-    return Response.json(resendData);
-  } catch (error) {
-    return Response.json({ error }, { status: 500 });
+    const { fullName, email, message } = parseResult.data;
+
+    const result = await sendContactEmails({
+      fullName,
+      email,
+      message,
+    });
+
+    return Response.json(result, { status: 200 });
+  } catch (error: any) {
+    console.error("Error sending contact email:", error);
+    return Response.json(
+      { error: error?.message || "Failed to send email. Please try again." },
+      { status: 500 }
+    );
   }
 }

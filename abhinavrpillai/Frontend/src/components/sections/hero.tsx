@@ -46,25 +46,32 @@ const HeroSection = () => {
                   </p>
                 </BlurIn>
 
-                <BlurIn delay={1}>
+                <BlurIn delay={0.9}>
                   <Tooltip delayDuration={300}>
                     <TooltipTrigger asChild>
                       <h1
                         className={cn(
                           "leading-tight sm:leading-none text-transparent text-slate-800 text-left",
                           "font-bold text-4xl sm:text-6xl md:text-7xl lg:text-8xl xl:text-9xl",
-                          "cursor-default text-edge-outline font-display tracking-tight"
+                          "cursor-pointer text-edge-outline font-display tracking-tight select-none"
                         )}
                       >
-                        {config.author.split(" ")[0]}
-                        <br />
-                        {config.author.split(" ").slice(1).join(" ")}
+                        <ScrambleText
+                          text={config.author.split(" ")[0]}
+                          delay={900}
+                        />
+                        <ScrambleText
+                          text={config.author.split(" ").slice(1).join(" ")}
+                          delay={1300}
+                        />
                       </h1>
                     </TooltipTrigger>
                     <TooltipContent
                       side="top"
-                      className="dark:bg-white dark:text-black"
-                    />
+                      className="dark:bg-white dark:text-black font-mono text-xs"
+                    >
+                      Hover to scramble text
+                    </TooltipContent>
                   </Tooltip>
                 </BlurIn>
                 <BlurIn delay={1.2}>
@@ -150,5 +157,68 @@ const HeroSection = () => {
     </SectionWrapper>
   );
 };
+
+const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=";
+
+function ScrambleText({ text, delay = 0 }: { text: string; delay?: number }) {
+  const [displayText, setDisplayText] = React.useState(text);
+  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const startScramble = React.useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    let iteration = 0;
+    const totalSteps = text.length * 3;
+
+    intervalRef.current = setInterval(() => {
+      setDisplayText(() => {
+        return text
+          .split("")
+          .map((char, index) => {
+            if (char === " ") return " ";
+            // Gradually resolve letters from left to right
+            if (index < iteration / 3) {
+              return text[index];
+            }
+            return GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+          })
+          .join("");
+      });
+
+      iteration += 1;
+      if (iteration > totalSteps) {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        setDisplayText(text);
+      }
+    }, 30);
+  }, [text]);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      startScramble();
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [delay, startScramble]);
+
+  return (
+    <span
+      onMouseEnter={startScramble}
+      className="block whitespace-nowrap transition-transform duration-200 hover:scale-[1.01] hover:text-foreground"
+    >
+      {displayText}
+    </span>
+  );
+}
 
 export default HeroSection;

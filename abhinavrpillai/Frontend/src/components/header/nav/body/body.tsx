@@ -67,13 +67,39 @@ export default function Body({
             href={href}
             target={target}
             className="cursor-can-hover rounded-lg"
+            onClick={(e) => {
+              setIsActive(false);
+              if (href === "/") {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                window.history.pushState(null, "", "/");
+                return;
+              }
+              if (href.startsWith("/#")) {
+                const targetId = href.replace("/#", "");
+                const element = document.getElementById(targetId);
+                if (element) {
+                  e.preventDefault();
+                  // Allow menu collapse animation to start before calculating final scroll position
+                  setTimeout(() => {
+                    const headerOffset = 80;
+                    const elementPosition = element.getBoundingClientRect().top;
+                    const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+                    window.scrollTo({
+                      top: Math.max(0, offsetPosition),
+                      behavior: "smooth"
+                    });
+                  }, 100);
+                  window.history.pushState(null, "", href);
+                }
+              }
+            }}
           >
             <motion.p
               className={cn(
                 "font-display rounded-lg",
                 currentHref !== href ? "text-muted-foreground" : "underline"
               )}
-              onClick={() => setIsActive(false)}
               onMouseOver={() => {
                 setSelectedLink({ isActive: true, index });
                 playKeycapClick();

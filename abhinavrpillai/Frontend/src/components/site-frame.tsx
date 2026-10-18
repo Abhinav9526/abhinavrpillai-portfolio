@@ -13,14 +13,15 @@ import AppOverlays from "@/components/app-overlays";
 export default function SiteFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const bare = pathname?.startsWith("/components") ?? false;
+  const isResume = pathname?.startsWith("/resume") ?? false;
 
   if (bare) return <>{children}</>;
 
   return (
     <>
-      <Header />
+      {!isResume && <Header />}
       {children}
-      <Footer />
+      {!isResume && <Footer />}
       <AppOverlays />
     </>
   );

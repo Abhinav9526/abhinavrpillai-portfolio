@@ -24,6 +24,7 @@ export default function AudioPlayer() {
         .then(() => {
           setIsPlaying(true);
           localStorage.setItem("bg-music-playing", "true");
+          window.dispatchEvent(new CustomEvent("bg-music-change", { detail: { isPlaying: true } }));
         })
         .catch((err) => {
           console.log("Autoplay blocked or audio failed:", err);
@@ -75,11 +76,13 @@ export default function AudioPlayer() {
       audio.pause();
       setIsPlaying(false);
       localStorage.setItem("bg-music-playing", "false");
+      window.dispatchEvent(new CustomEvent("bg-music-change", { detail: { isPlaying: false } }));
     } else {
       audio.play()
         .then(() => {
           setIsPlaying(true);
           localStorage.setItem("bg-music-playing", "true");
+          window.dispatchEvent(new CustomEvent("bg-music-change", { detail: { isPlaying: true } }));
         })
         .catch((err) => console.log(err));
     }

@@ -5,8 +5,7 @@ import { ReactNode } from "react"
 
 export const SectionHeader = ({ id, title, desc, className }: { id: string, title: string | ReactNode, desc?: string, className?: string }) => {
   return (
-
-    <div className={cn("top-[70px] relative md:sticky mb-10 md:mb-96 px-2", className)}>
+    <div className={cn("relative mb-6 sm:mb-8 px-2", className)}>
       <Link href={`#${id}`}>
         <BoxReveal width="100%">
           <h2

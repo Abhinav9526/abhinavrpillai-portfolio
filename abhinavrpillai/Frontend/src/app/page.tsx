@@ -14,6 +14,16 @@ import SpotlightGlow from "@/components/spotlight-glow";
 import AudioPlayer from "@/components/audio-player";
 
 function MainPage() {
+  React.useEffect(() => {
+    // When opening for the first time, ensure page starts at the top
+    if (typeof window !== "undefined") {
+      if ("scrollRestoration" in window.history) {
+        window.history.scrollRestoration = "manual";
+      }
+      window.scrollTo(0, 0);
+    }
+  }, []);
+
   return (
     <SmoothScroll>
       <ThreeBackground />

@@ -241,7 +241,7 @@ export const EXPERIENCE: Experience[] = [
     startDate: "Jan 2025",
     endDate: "Present",
     title: "Software Engineer",
-    company: "Tech Solutions",
+    company: "Thoughtline Digital",
     description: [
       "Managed multiple client and internal web applications, balancing independent end-to-end development with collaborative team-based work.",
       "Built and deployed full-stack web applications from the ground up, handling everything from architectural decisions and development to testing and production releases.",

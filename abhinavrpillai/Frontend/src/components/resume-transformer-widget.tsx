@@ -9,7 +9,7 @@ const RAW_MESSY_TEXT =
 
 const FORMATTED_RESUME = {
   title: "Software Engineer",
-  company: "Tech Solutions",
+  company: "Thoughtline Digital",
   bulletPoints: [
     "Architected scalable full-stack applications using React.js and Node.js with MongoDB backend engines.",
     "Engineered end-to-end automation pipelines utilizing Playwright, reducing regression times by 40%.",

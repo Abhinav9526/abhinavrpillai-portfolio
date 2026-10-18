@@ -94,7 +94,12 @@ function Preloader({ children, disabled = false }: PreloaderProps) {
           <Loader
             loadingPercent={loadingPercent}
             isReadyToEnter={isReadyToEnter}
-            onEnter={() => setIsLoading(false)}
+            onEnter={() => {
+              if (typeof window !== "undefined") {
+                window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+              }
+              setIsLoading(false);
+            }}
           />
         )}
       </AnimatePresence>

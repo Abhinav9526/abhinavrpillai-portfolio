@@ -7,7 +7,6 @@ import { Textarea } from "./ui/ace-textarea";
 import { cn } from "@/lib/utils";
 import { useToast } from "./ui/use-toast";
 import { Button } from "./ui/button";
-import { useRouter } from "next/navigation";
 import { z } from "zod";
 
 const formSchema = z.object({
@@ -18,7 +17,11 @@ const formSchema = z.object({
 
 type FieldErrors = Partial<Record<keyof z.infer<typeof formSchema>, string>>;
 
-const ContactForm = () => {
+interface ContactFormProps {
+  onStateChange?: (state: "idle" | "writing" | "submitted") => void;
+}
+
+const ContactForm = ({ onStateChange }: ContactFormProps) => {
   const [fullName, setFullName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [message, setMessage] = React.useState("");
@@ -26,7 +29,26 @@ const ContactForm = () => {
   const [errors, setErrors] = React.useState<FieldErrors>({});
 
   const { toast } = useToast();
-  const router = useRouter();
+  const typingTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Trigger writing animation state when user types into any input
+  const handleTyping = React.useCallback(() => {
+    if (onStateChange) {
+      onStateChange("writing");
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+      }
+      typingTimerRef.current = setTimeout(() => {
+        onStateChange("idle");
+      }, 950);
+    }
+  }, [onStateChange]);
+
+  React.useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -54,24 +76,32 @@ const ContactForm = () => {
         const data = await res.json();
         throw new Error(data.error || `Request failed (${res.status})`);
       }
+
+      // Trigger celebratory reaction on character
+      if (onStateChange) {
+        onStateChange("submitted");
+        setTimeout(() => {
+          onStateChange("idle");
+        }, 3500);
+      }
+
       toast({
-        title: "Thank you!",
-        description: "I'll get back to you as soon as possible.",
+        title: "Message Sent Successfully! ✨",
+        description: "Thank you for contacting me! A confirmation email has also been sent to you.",
         variant: "default",
-        className: cn("top-0 mx-auto flex fixed md:top-4 md:right-4"),
+        className: cn("top-0 mx-auto flex fixed md:top-4 md:right-4 bg-emerald-600 text-white border-emerald-500 shadow-2xl"),
       });
       setLoading(false);
       setFullName("");
       setEmail("");
       setMessage("");
-      const timer = setTimeout(() => {
-        router.push("/");
-        clearTimeout(timer);
-      }, 1000);
-    } catch (err) {
+    } catch (err: any) {
+      if (onStateChange) {
+        onStateChange("idle");
+      }
       toast({
-        title: "Error",
-        description: "Something went wrong! Please try again.",
+        title: "Error Sending Message",
+        description: err?.message || "Something went wrong! Please try again.",
         className: cn(
           "top-0 w-full flex justify-center fixed md:max-w-7xl md:top-4 md:right-4"
         ),
@@ -80,6 +110,7 @@ const ContactForm = () => {
     }
     setLoading(false);
   };
+
   return (
     <form className="w-full max-w-7xl mx-auto sm:mt-4" onSubmit={handleSubmit} aria-busy={loading}>
       <div className="flex flex-col md:flex-row space-y-3 md:space-y-0 md:space-x-2 mb-4">
@@ -90,7 +121,11 @@ const ContactForm = () => {
             placeholder="Your Name"
             type="text"
             value={fullName}
-            onChange={(e) => { setFullName(e.target.value); setErrors((p) => ({ ...p, fullName: undefined })); }}
+            onChange={(e) => {
+              setFullName(e.target.value);
+              setErrors((p) => ({ ...p, fullName: undefined }));
+              handleTyping();
+            }}
           />
           {errors.fullName && <p className="text-sm text-red-500">{errors.fullName}</p>}
         </LabelInputContainer>
@@ -101,7 +136,11 @@ const ContactForm = () => {
             placeholder="you@example.com"
             type="email"
             value={email}
-            onChange={(e) => { setEmail(e.target.value); setErrors((p) => ({ ...p, email: undefined })); }}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setErrors((p) => ({ ...p, email: undefined }));
+              handleTyping();
+            }}
           />
           {errors.email && <p className="text-sm text-red-500">{errors.email}</p>}
         </LabelInputContainer>
@@ -112,10 +151,14 @@ const ContactForm = () => {
           placeholder="Tell me about about your project,"
           id="content"
           value={message}
-          onChange={(e) => { setMessage(e.target.value); setErrors((p) => ({ ...p, message: undefined })); }}
+          onChange={(e) => {
+            setMessage(e.target.value);
+            setErrors((p) => ({ ...p, message: undefined }));
+            handleTyping();
+          }}
         />
         {errors.message && <p className="text-sm text-red-500">{errors.message}</p>}
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground mt-1">
           I&apos;ll never share your data with anyone else. Pinky promise!
         </p>
       </div>
@@ -159,8 +202,8 @@ const LabelInputContainer = ({
 const BottomGradient = () => {
   return (
     <>
-      <span className="group-hover/btn:opacity-100 block transition duration-500 opacity-0 absolute h-px w-full -bottom-px inset-x-0 bg-gradient-to-r from-transparent via-brand to-transparent" />
-      <span className="group-hover/btn:opacity-100 blur-sm block transition duration-500 opacity-0 absolute h-px w-1/2 mx-auto -bottom-px inset-x-10 bg-gradient-to-r from-transparent orange-400 to-transparent" />
+      <span className="group-hover/btn:opacity-100 block transition duration-500 opacity-0 absolute h-px w-full -bottom-px inset-x-0 bg-gradient-to-r from-transparent via-cyan-500 to-transparent" />
+      <span className="group-hover/btn:opacity-100 blur-sm block transition duration-500 opacity-0 absolute h-px w-1/2 mx-auto -bottom-px inset-x-10 bg-gradient-to-r from-transparent via-indigo-500 to-transparent" />
     </>
   );
 };

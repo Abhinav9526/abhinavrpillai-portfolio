@@ -12,6 +12,7 @@ import { Button } from "../ui/button";
 import { config } from "@/data/config";
 import OnlineUsers from "../realtime/online-users";
 import { GitHubStarsButton } from "../ui/shadcn-io/github-stars-button";
+import AceTernityLogo from "../logos/aceternity";
 
 interface HeaderProps {
   loader?: boolean;
@@ -51,12 +52,11 @@ const Header = ({ loader }: HeaderProps) => {
       </div> */}
       <div className={cn(styles.bar, "flex items-center justify-between w-full max-w-7xl mx-auto")}>
         <Button variant={"link"} className="p-0 h-auto hover:no-underline shrink-0 max-w-[65%] sm:max-w-none" asChild>
-          <Link href="/" className="flex items-center gap-2" aria-label={config.author}>
-            <img
-              src="/assets/logo-header.png"
-              alt={config.author}
-              className="h-6 sm:h-7 md:h-8 w-auto max-w-full object-contain rounded"
-            />
+          <Link href="/" className="flex items-center gap-2 sm:gap-2.5" aria-label={config.author}>
+            <AceTernityLogo className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 text-primary" fill="currentColor" />
+            <span className="text-[11px] sm:text-sm md:text-base font-semibold tracking-[0.18em] uppercase text-foreground whitespace-nowrap">
+              {config.author}
+            </span>
           </Link>
         </Button>
 
