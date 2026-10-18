@@ -158,7 +158,7 @@ wss.on('connection', (ws, req) => {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
-            silenceDurationMs: 300 // Lower silence detection threshold to 300ms for ultra-fast VAD trigger
+            silenceDurationMs: 750 // 750ms prevents AI speech from stuttering or breaking on natural speech pauses
           }
         },
         generationConfig: {

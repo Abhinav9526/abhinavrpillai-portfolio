@@ -212,10 +212,11 @@ export default function AIAgent() {
       gainNode.connect(audioCtx.destination);
 
       const curTime = audioCtx.currentTime;
-      if (nextPlayTimeRef.current < curTime) {
-        // Remote WebSocket audio arrives with normal internet jitter. Starting
-        // with a small buffer prevents gaps that are not noticeable locally.
-        nextPlayTimeRef.current = curTime + 0.25;
+      // Audio buffering / jitter control:
+      // If the timeline fell behind or is just starting, add a small 60ms lead
+      // to let chunks overlap seamlessly without inserting silent gaps.
+      if (nextPlayTimeRef.current < curTime + 0.02) {
+        nextPlayTimeRef.current = curTime + 0.06;
       }
 
       source.start(nextPlayTimeRef.current);
