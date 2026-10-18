@@ -252,9 +252,15 @@ export default function AIAgent() {
 
       const curTime = audioCtx.currentTime;
 
-      // Lookahead scheduling: if stopped, start with 80ms buffer lead
-      if (nextPlayTimeRef.current < curTime) {
-        nextPlayTimeRef.current = curTime + 0.08;
+      // Ensure AudioContext is running
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().catch((e) => console.warn(e));
+      }
+
+      // Dynamic sync & jitter control:
+      // If playback fell behind or drifted more than 350ms ahead, resync to immediate 40ms lead
+      if (nextPlayTimeRef.current < curTime || nextPlayTimeRef.current > curTime + 0.35) {
+        nextPlayTimeRef.current = curTime + 0.04;
       }
 
       source.start(nextPlayTimeRef.current);
@@ -361,10 +367,13 @@ export default function AIAgent() {
         if (audioContextRef.current && micStreamRef.current) {
           try {
             const audioCtx = audioContextRef.current;
+            if (audioCtx.state === "suspended") {
+              audioCtx.resume().catch((e) => console.warn(e));
+            }
+
             const mediaSource = audioCtx.createMediaStreamSource(micStreamRef.current);
             mediaStreamSourceRef.current = mediaSource;
 
-            // 2048 buffer size cuts mic lag from 171ms to 42ms!
             const scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
             mediaSource.connect(scriptNode);
 
@@ -384,23 +393,31 @@ export default function AIAgent() {
                 }
                 const rms = Math.sqrt(sum / inputData.length);
 
-                // Acoustic Echo Ducking:
-                // Raise gate threshold when AI is talking so speaker audio doesn't cause false barge-in
-                const threshold = isAiSpeakingRef.current ? 0.08 : 0.015;
+                // Barge-in (Interruption) handling:
+                // If AI is answering and user speaks (rms > 0.015), immediately halt local playback and send voice to Gemini!
+                if (isAiSpeakingRef.current) {
+                  if (rms > 0.015) {
+                    clearAudioQueue();
+                  } else {
+                    return; // Duck quiet speaker acoustic feedback
+                  }
+                }
 
-                if (rms > threshold) {
+                // Update visual status
+                if (rms > 0.003) {
                   if (!isAiSpeakingRef.current) {
                     setMicStatus("listening");
                   }
-
-                  const resampled = resampleBuffer(inputData, audioCtx.sampleRate, 16000);
-                  const pcm16 = float32ToPcm16(resampled);
-                  socketRef.current.send(pcm16);
                 } else {
                   if (!isAiSpeakingRef.current) {
                     setMicStatus("idle");
                   }
                 }
+
+                // Send 16kHz PCM audio chunk to Gemini on Render
+                const resampled = resampleBuffer(inputData, audioCtx.sampleRate, 16000);
+                const pcm16 = float32ToPcm16(resampled);
+                socketRef.current.send(pcm16);
               }
             };
           } catch (err) {
@@ -409,7 +426,7 @@ export default function AIAgent() {
         }
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
         if (typeof event.data === "string") {
           try {
             const data = JSON.parse(event.data);
@@ -422,8 +439,14 @@ export default function AIAgent() {
             console.error("Error parsing message from server:", e);
           }
         } else {
-          // Binary 24kHz PCM from Gemini Live via Render
-          const float32Audio = pcm16ToFloat32(event.data);
+          // Binary 24kHz PCM from Gemini Live via Render (handles both ArrayBuffer and Blob)
+          let arrayBuffer: ArrayBuffer;
+          if (event.data instanceof Blob) {
+            arrayBuffer = await event.data.arrayBuffer();
+          } else {
+            arrayBuffer = event.data;
+          }
+          const float32Audio = pcm16ToFloat32(arrayBuffer);
           queueAudioChunk(float32Audio);
           setMicStatus("speaking");
         }
